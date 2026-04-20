@@ -96,6 +96,11 @@ export async function getImportDate(): Promise<string | null> {
   }
 }
 
+function nullStr(val: string | null): string | null {
+  if (!val || val === "NULL") return null;
+  return val;
+}
+
 function groupByPerson(rows: PRRow[]): PersonPRs[] {
   const map = new Map<string, PersonPRs>();
 
@@ -121,7 +126,7 @@ function groupByPerson(rows: PRRow[]): PersonPRs[] {
         wr: row.single_wr,
         cr: row.single_cr,
         nr: row.single_nr,
-        regionalRecord: row.regional_single_record,
+        regionalRecord: nullStr(row.regional_single_record),
       });
     }
 
@@ -137,11 +142,17 @@ function groupByPerson(rows: PRRow[]): PersonPRs[] {
         wr: row.avg_wr,
         cr: row.avg_cr,
         nr: row.avg_nr,
-        regionalRecord: row.regional_average_record,
+        regionalRecord: nullStr(row.regional_average_record),
       });
     }
   }
 
   // Remove persons with no PRs (shouldn't happen, but safety net)
-  return [...map.values()].filter((p) => p.prs.length > 0);
+  return [...map.values()]
+    .filter((p) => p.prs.length > 0)
+    .sort((a, b) => {
+      const minNr = (p: PersonPRs) =>
+        Math.min(...p.prs.map((pr) => pr.nr ?? Infinity));
+      return minNr(a) - minNr(b);
+    });
 }
