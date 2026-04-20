@@ -88,23 +88,32 @@ async function batchInsert<T>(
 
 // ─── Import functions ─────────────────────────────────────────────────────────
 
+// Helper: returns value from row, checking snake_case first then camelCase fallback
+function col(row: Record<string, string>, snake: string, camel?: string): string {
+  return row[snake] ?? (camel ? row[camel] : undefined) ?? "";
+}
+
+function dateOrNull(val: string): string | null {
+  return val && val.trim() ? val.trim() : null;
+}
+
 async function importCompetitions(filePath: string): Promise<void> {
   console.log("Importing competitions...");
   await sql`TRUNCATE competitions CASCADE`;
 
   const rows: {
     id: string; name: string; city_name: string;
-    country_id: string; start_date: string; end_date: string;
+    country_id: string; start_date: string | null; end_date: string | null;
   }[] = [];
 
   for await (const row of readTSV(filePath)) {
     rows.push({
       id: row["id"],
       name: row["name"],
-      city_name: row["cityName"] ?? "",
-      country_id: row["countryId"] ?? "",
-      start_date: row["start_date"] ?? "",
-      end_date: row["end_date"] ?? "",
+      city_name: col(row, "city_name", "cityName"),
+      country_id: col(row, "country_id", "countryId"),
+      start_date: dateOrNull(row["start_date"] ?? ""),
+      end_date: dateOrNull(row["end_date"] ?? ""),
     });
   }
 
@@ -131,13 +140,15 @@ async function importPersons(filePath: string): Promise<Set<string>> {
   const rows: { wca_id: string; sub_id: number; name: string; country_id: string }[] = [];
 
   for await (const row of readTSV(filePath)) {
-    if (row["countryId"] !== COUNTRY) continue;
-    swissIds.add(row["id"]);
+    const countryId = col(row, "country_id", "countryId");
+    if (countryId !== COUNTRY) continue;
+    const id = row["id"] ?? row["wca_id"] ?? "";
+    swissIds.add(id);
     rows.push({
-      wca_id: row["id"],
+      wca_id: id,
       sub_id: Number(row["subid"]) || 1,
       name: row["name"],
-      country_id: row["countryId"],
+      country_id: countryId,
     });
   }
 
@@ -166,21 +177,22 @@ async function importResults(filePath: string): Promise<void> {
   }[] = [];
 
   for await (const row of readTSV(filePath)) {
-    if (row["personCountryId"] !== COUNTRY) continue;
+    const personCountryId = col(row, "person_country_id", "personCountryId");
+    if (personCountryId !== COUNTRY) continue;
 
     rows.push({
-      competition_id: row["competitionId"],
-      event_id: row["eventId"],
-      round_type_id: row["roundTypeId"] ?? "",
-      pos: Number(row["pos"]) || 0,
-      best: Number(row["best"]) || 0,
-      average: Number(row["average"]) || 0,
-      person_name: row["personName"],
-      person_id: row["personId"],
-      person_country_id: row["personCountryId"],
-      format_id: row["formatId"] ?? "",
-      regional_single_record: row["regionalSingleRecord"] || null,
-      regional_average_record: row["regionalAverageRecord"] || null,
+      competition_id:          col(row, "competition_id",          "competitionId"),
+      event_id:                col(row, "event_id",                "eventId"),
+      round_type_id:           col(row, "round_type_id",           "roundTypeId"),
+      pos:                     Number(row["pos"]) || 0,
+      best:                    Number(row["best"]) || 0,
+      average:                 Number(row["average"]) || 0,
+      person_name:             col(row, "person_name",             "personName"),
+      person_id:               col(row, "person_id",               "personId"),
+      person_country_id:       personCountryId,
+      format_id:               col(row, "format_id",               "formatId"),
+      regional_single_record:  col(row, "regional_single_record",  "regionalSingleRecord") || null,
+      regional_average_record: col(row, "regional_average_record", "regionalAverageRecord") || null,
     });
   }
 
@@ -205,14 +217,15 @@ async function importRanks(
   }[] = [];
 
   for await (const row of readTSV(filePath)) {
-    if (!swissIds.has(row["personId"])) continue;
+    const personId = col(row, "person_id", "personId");
+    if (!swissIds.has(personId)) continue;
     rows.push({
-      person_id: row["personId"],
-      event_id: row["eventId"],
-      best: Number(row["best"]) || 0,
-      world_rank: Number(row["worldRank"]) || 0,
-      continent_rank: Number(row["continentRank"]) || 0,
-      country_rank: Number(row["countryRank"]) || 0,
+      person_id:      personId,
+      event_id:       col(row, "event_id",       "eventId"),
+      best:           Number(row["best"]) || 0,
+      world_rank:     Number(col(row, "world_rank",     "worldRank"))     || 0,
+      continent_rank: Number(col(row, "continent_rank", "continentRank")) || 0,
+      country_rank:   Number(col(row, "country_rank",   "countryRank"))   || 0,
     });
   }
 
