@@ -1,7 +1,17 @@
-export function formatTime(cs: number, eventId: string): string {
+export function formatTime(
+  cs: number,
+  eventId: string,
+  type: "single" | "average" = "single"
+): string {
   if (cs <= 0) return cs === -1 ? "DNF" : "DNS";
 
-  if (eventId === "333fm") return cs.toString();
+  if (eventId === "333fm") {
+    // FMC results are stored as moves × 100
+    const moves = cs / 100;
+    return type === "single"
+      ? `${Math.round(moves)} Moves`
+      : `${moves.toFixed(2)} Moves`;
+  }
 
   if (eventId === "333mbf") {
     const missed = cs % 100;
