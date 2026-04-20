@@ -58,6 +58,7 @@ async function* readTSV(
 
   let headers: string[] = [];
   let isHeader = true;
+  let firstRow: Record<string, string> | null = null;
 
   for await (const line of rl) {
     if (isHeader) {
@@ -70,6 +71,11 @@ async function* readTSV(
     const row: Record<string, string> = {};
     for (let i = 0; i < headers.length; i++) {
       row[headers[i]] = cols[i] ?? "";
+    }
+    if (!firstRow) {
+      firstRow = row;
+      console.log(`  Headers: ${headers.join(", ")}`);
+      console.log(`  First row sample: ${JSON.stringify(row)}`);
     }
     yield row;
   }
