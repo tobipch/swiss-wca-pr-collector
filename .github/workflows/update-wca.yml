@@ -19,6 +19,11 @@ jobs:
 
       - run: npm ci
 
+      - name: Setup database tables
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:setup
+
       - name: Import WCA data
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
