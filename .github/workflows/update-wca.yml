@@ -2,8 +2,8 @@ name: Update WCA Data
 
 on:
   schedule:
-    # Every Monday at 06:00 UTC (WCA exports are updated on Mondays)
-    - cron: "0 6 * * 1"
+    # Every Tuesday at 06:00 UTC — WCA publishes new exports on Mondays
+    - cron: "0 6 * * 2"
   workflow_dispatch: # Allow manual trigger
 
 jobs:
