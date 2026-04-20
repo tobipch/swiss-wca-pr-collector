@@ -14,7 +14,7 @@
 
 import "dotenv/config";
 import { createWriteStream, createReadStream } from "node:fs";
-import { mkdir, unlink, rm } from "node:fs/promises";
+import { mkdir, unlink, rm, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import readline from "node:readline";
@@ -27,7 +27,7 @@ if (!DATABASE_URL) throw new Error("DATABASE_URL is not set");
 
 const WCA_EXPORT_URL =
   process.env.WCA_EXPORT_URL ??
-  "https://www.worldcubeassociation.org/export/results/WCA_export.tsv.zip";
+  "https://www.worldcubeassociation.org/export/results/v2/tsv";
 
 const COUNTRY = "Switzerland";
 const BATCH_SIZE = 500;
@@ -86,7 +86,26 @@ async function batchInsert<T>(
   }
 }
 
+function deduplicateBy<T>(items: T[], keyFn: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = keyFn(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 // ─── Import functions ─────────────────────────────────────────────────────────
+
+// Helper: returns value from row, checking snake_case first then camelCase fallback
+function col(row: Record<string, string>, snake: string, camel?: string): string {
+  return row[snake] ?? (camel ? row[camel] : undefined) ?? "";
+}
+
+function dateOrNull(val: string): string | null {
+  return val && val.trim() ? val.trim() : null;
+}
 
 async function importCompetitions(filePath: string): Promise<void> {
   console.log("Importing competitions...");
@@ -94,17 +113,17 @@ async function importCompetitions(filePath: string): Promise<void> {
 
   const rows: {
     id: string; name: string; city_name: string;
-    country_id: string; start_date: string; end_date: string;
+    country_id: string; start_date: string | null; end_date: string | null;
   }[] = [];
 
   for await (const row of readTSV(filePath)) {
     rows.push({
       id: row["id"],
       name: row["name"],
-      city_name: row["cityName"] ?? "",
-      country_id: row["countryId"] ?? "",
-      start_date: row["start_date"] ?? "",
-      end_date: row["end_date"] ?? "",
+      city_name: col(row, "city_name", "cityName"),
+      country_id: col(row, "country_id", "countryId"),
+      start_date: dateOrNull(row["start_date"] ?? ""),
+      end_date: dateOrNull(row["end_date"] ?? ""),
     });
   }
 
@@ -131,17 +150,20 @@ async function importPersons(filePath: string): Promise<Set<string>> {
   const rows: { wca_id: string; sub_id: number; name: string; country_id: string }[] = [];
 
   for await (const row of readTSV(filePath)) {
-    if (row["countryId"] !== COUNTRY) continue;
-    swissIds.add(row["id"]);
+    const countryId = col(row, "country_id", "countryId");
+    if (countryId !== COUNTRY) continue;
+    const id = row["id"] ?? row["wca_id"] ?? "";
+    swissIds.add(id);
     rows.push({
-      wca_id: row["id"],
-      sub_id: Number(row["subid"]) || 1,
+      wca_id: id,
+      sub_id: Number(row["subid"]) || 0,
       name: row["name"],
-      country_id: row["countryId"],
+      country_id: countryId,
     });
   }
 
-  await batchInsert(rows, async (batch) => {
+  const deduped = deduplicateBy(rows, (r) => `${r.wca_id}:${r.sub_id}`);
+  await batchInsert(deduped, async (batch) => {
     await sql`
       INSERT INTO persons ${sql(batch)}
       ON CONFLICT (wca_id, sub_id) DO UPDATE SET
@@ -166,21 +188,22 @@ async function importResults(filePath: string): Promise<void> {
   }[] = [];
 
   for await (const row of readTSV(filePath)) {
-    if (row["personCountryId"] !== COUNTRY) continue;
+    const personCountryId = col(row, "person_country_id", "personCountryId");
+    if (personCountryId !== COUNTRY) continue;
 
     rows.push({
-      competition_id: row["competitionId"],
-      event_id: row["eventId"],
-      round_type_id: row["roundTypeId"] ?? "",
-      pos: Number(row["pos"]) || 0,
-      best: Number(row["best"]) || 0,
-      average: Number(row["average"]) || 0,
-      person_name: row["personName"],
-      person_id: row["personId"],
-      person_country_id: row["personCountryId"],
-      format_id: row["formatId"] ?? "",
-      regional_single_record: row["regionalSingleRecord"] || null,
-      regional_average_record: row["regionalAverageRecord"] || null,
+      competition_id:          col(row, "competition_id",          "competitionId"),
+      event_id:                col(row, "event_id",                "eventId"),
+      round_type_id:           col(row, "round_type_id",           "roundTypeId"),
+      pos:                     Number(row["pos"]) || 0,
+      best:                    Number(row["best"]) || 0,
+      average:                 Number(row["average"]) || 0,
+      person_name:             col(row, "person_name",             "personName"),
+      person_id:               col(row, "person_id",               "personId"),
+      person_country_id:       personCountryId,
+      format_id:               col(row, "format_id",               "formatId"),
+      regional_single_record:  col(row, "regional_single_record",  "regionalSingleRecord") || null,
+      regional_average_record: col(row, "regional_average_record", "regionalAverageRecord") || null,
     });
   }
 
@@ -205,18 +228,20 @@ async function importRanks(
   }[] = [];
 
   for await (const row of readTSV(filePath)) {
-    if (!swissIds.has(row["personId"])) continue;
+    const personId = col(row, "person_id", "personId");
+    if (!swissIds.has(personId)) continue;
     rows.push({
-      person_id: row["personId"],
-      event_id: row["eventId"],
-      best: Number(row["best"]) || 0,
-      world_rank: Number(row["worldRank"]) || 0,
-      continent_rank: Number(row["continentRank"]) || 0,
-      country_rank: Number(row["countryRank"]) || 0,
+      person_id:      personId,
+      event_id:       col(row, "event_id",       "eventId"),
+      best:           Number(row["best"]) || 0,
+      world_rank:     Number(col(row, "world_rank",     "worldRank"))     || 0,
+      continent_rank: Number(col(row, "continent_rank", "continentRank")) || 0,
+      country_rank:   Number(col(row, "country_rank",   "countryRank"))   || 0,
     });
   }
 
-  await batchInsert(rows, async (batch) => {
+  const deduped = deduplicateBy(rows, (r) => `${r.person_id}:${r.event_id}`);
+  await batchInsert(deduped, async (batch) => {
     await sql`
       INSERT INTO ${sql(table)} ${sql(batch)}
       ON CONFLICT (person_id, event_id) DO UPDATE SET
@@ -247,13 +272,23 @@ async function main() {
     const zip = new AdmZip(zipPath);
     zip.extractAllTo(extractDir, true);
 
-    const file = (name: string) => join(extractDir, name);
+    const entries = await readdir(extractDir, { recursive: true });
+    const tsvFiles = entries.map(String).filter((f) => f.endsWith(".tsv"));
+    console.log("Found TSV files:", tsvFiles);
 
-    const swissIds = await importPersons(file("WCA_export_Persons.tsv"));
-    await importCompetitions(file("WCA_export_Competitions.tsv"));
-    await importResults(file("WCA_export_Results.tsv"));
-    await importRanks(file("WCA_export_RanksSingle.tsv"), "ranks_single", swissIds);
-    await importRanks(file("WCA_export_RanksAverage.tsv"), "ranks_average", swissIds);
+    function findTsv(keyword: string): string {
+      const match = tsvFiles.find((f) =>
+        f.toLowerCase().includes(keyword.toLowerCase())
+      );
+      if (!match) throw new Error(`No TSV file found for keyword: ${keyword}`);
+      return join(extractDir, match);
+    }
+
+    const swissIds = await importPersons(findTsv("Persons"));
+    await importCompetitions(findTsv("Competitions"));
+    await importResults(findTsv("Results"));
+    await importRanks(findTsv("ranks_single"), "ranks_single", swissIds);
+    await importRanks(findTsv("ranks_average"), "ranks_average", swissIds);
 
     await sql`
       INSERT INTO import_metadata (key, value, updated_at)
