@@ -14,7 +14,7 @@
 
 import "dotenv/config";
 import { createWriteStream, createReadStream } from "node:fs";
-import { mkdir, unlink, rm } from "node:fs/promises";
+import { mkdir, unlink, rm, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import readline from "node:readline";
@@ -247,13 +247,23 @@ async function main() {
     const zip = new AdmZip(zipPath);
     zip.extractAllTo(extractDir, true);
 
-    const file = (name: string) => join(extractDir, name);
+    const entries = await readdir(extractDir, { recursive: true });
+    const tsvFiles = entries.map(String).filter((f) => f.endsWith(".tsv"));
+    console.log("Found TSV files:", tsvFiles);
 
-    const swissIds = await importPersons(file("WCA_export_Persons.tsv"));
-    await importCompetitions(file("WCA_export_Competitions.tsv"));
-    await importResults(file("WCA_export_Results.tsv"));
-    await importRanks(file("WCA_export_RanksSingle.tsv"), "ranks_single", swissIds);
-    await importRanks(file("WCA_export_RanksAverage.tsv"), "ranks_average", swissIds);
+    function findTsv(keyword: string): string {
+      const match = tsvFiles.find((f) =>
+        f.toLowerCase().includes(keyword.toLowerCase())
+      );
+      if (!match) throw new Error(`No TSV file found for keyword: ${keyword}`);
+      return join(extractDir, match);
+    }
+
+    const swissIds = await importPersons(findTsv("Persons"));
+    await importCompetitions(findTsv("Competitions"));
+    await importResults(findTsv("Results"));
+    await importRanks(findTsv("RanksSingle"), "ranks_single", swissIds);
+    await importRanks(findTsv("RanksAverage"), "ranks_average", swissIds);
 
     await sql`
       INSERT INTO import_metadata (key, value, updated_at)
