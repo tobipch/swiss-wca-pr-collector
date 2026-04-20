@@ -86,6 +86,16 @@ async function batchInsert<T>(
   }
 }
 
+function deduplicateBy<T>(items: T[], keyFn: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = keyFn(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 // ─── Import functions ─────────────────────────────────────────────────────────
 
 // Helper: returns value from row, checking snake_case first then camelCase fallback
@@ -146,13 +156,14 @@ async function importPersons(filePath: string): Promise<Set<string>> {
     swissIds.add(id);
     rows.push({
       wca_id: id,
-      sub_id: Number(row["subid"]) || 1,
+      sub_id: Number(row["subid"]) || 0,
       name: row["name"],
       country_id: countryId,
     });
   }
 
-  await batchInsert(rows, async (batch) => {
+  const deduped = deduplicateBy(rows, (r) => `${r.wca_id}:${r.sub_id}`);
+  await batchInsert(deduped, async (batch) => {
     await sql`
       INSERT INTO persons ${sql(batch)}
       ON CONFLICT (wca_id, sub_id) DO UPDATE SET
@@ -229,7 +240,8 @@ async function importRanks(
     });
   }
 
-  await batchInsert(rows, async (batch) => {
+  const deduped = deduplicateBy(rows, (r) => `${r.person_id}:${r.event_id}`);
+  await batchInsert(deduped, async (batch) => {
     await sql`
       INSERT INTO ${sql(table)} ${sql(batch)}
       ON CONFLICT (person_id, event_id) DO UPDATE SET
