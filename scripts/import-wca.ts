@@ -27,7 +27,7 @@ if (!DATABASE_URL) throw new Error("DATABASE_URL is not set");
 
 const WCA_EXPORT_URL =
   process.env.WCA_EXPORT_URL ??
-  "https://www.worldcubeassociation.org/export/results/WCA_export.tsv.zip";
+  "https://www.worldcubeassociation.org/export/results/v2/tsv";
 
 const COUNTRY = "Switzerland";
 const BATCH_SIZE = 500;
