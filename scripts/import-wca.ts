@@ -107,6 +107,14 @@ function dateOrNull(val: string): string | null {
   return val && val.trim() ? val.trim() : null;
 }
 
+function buildDate(year: string, month: string, day: string): string | null {
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+  if (!y || !m || !d) return null;
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
 async function importCompetitions(filePath: string): Promise<void> {
   console.log("Importing competitions...");
   await sql`TRUNCATE competitions CASCADE`;
@@ -122,8 +130,8 @@ async function importCompetitions(filePath: string): Promise<void> {
       name: row["name"],
       city_name: col(row, "city_name", "cityName"),
       country_id: col(row, "country_id", "countryId"),
-      start_date: dateOrNull(row["start_date"] ?? ""),
-      end_date: dateOrNull(row["end_date"] ?? ""),
+      start_date: buildDate(row["year"], row["month"], row["day"]),
+      end_date:   buildDate(row["end_year"], row["end_month"], row["end_day"]),
     });
   }
 

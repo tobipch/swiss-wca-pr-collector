@@ -72,7 +72,7 @@ export async function fetchPRs(days: number): Promise<PersonPRs[]> {
            ON r.person_id = ra.person_id AND r.event_id = ra.event_id
     WHERE
       r.person_country_id = 'Switzerland'
-      AND c.end_date >= CURRENT_DATE - (${days} || ' days')::interval
+      AND c.end_date >= CURRENT_DATE - (${days} * interval '1 day')
       AND c.end_date <= CURRENT_DATE + interval '1 day'
       AND (
         (r.best > 0 AND rs.best IS NOT NULL AND r.best = rs.best)
