@@ -29,7 +29,7 @@ export function eventName(id: string): string {
 }
 
 export function eventIconUrl(id: string): string {
-  return `https://icons.cubing.net/dist/svg/${id}.svg`;
+  return `https://cdn.jsdelivr.net/gh/cubing/icons@main/src/svg/event/${id}.svg`;
 }
 
 export function sortedByEvent<T extends { event_id: string }>(items: T[]): T[] {
