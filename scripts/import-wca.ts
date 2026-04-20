@@ -1,0 +1,274 @@
+/**
+ * Downloads the latest WCA developer export and imports Swiss data into PostgreSQL.
+ *
+ * Usage:
+ *   npm run db:import
+ *
+ * Required env:
+ *   DATABASE_URL  – PostgreSQL connection string
+ *
+ * Optional env:
+ *   WCA_EXPORT_URL – Override the default download URL
+ *                    Default: https://www.worldcubeassociation.org/export/results/WCA_export.tsv.zip
+ */
+
+import "dotenv/config";
+import { createWriteStream, createReadStream } from "node:fs";
+import { mkdir, unlink, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import readline from "node:readline";
+import { pipeline } from "node:stream/promises";
+import AdmZip from "adm-zip";
+import postgres from "postgres";
+
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) throw new Error("DATABASE_URL is not set");
+
+const WCA_EXPORT_URL =
+  process.env.WCA_EXPORT_URL ??
+  "https://www.worldcubeassociation.org/export/results/WCA_export.tsv.zip";
+
+const COUNTRY = "Switzerland";
+const BATCH_SIZE = 500;
+
+const sql = postgres(DATABASE_URL, { ssl: "require", max: 5 });
+
+// ─── Download ─────────────────────────────────────────────────────────────────
+
+async function download(url: string, dest: string): Promise<void> {
+  console.log(`Downloading ${url} ...`);
+  const res = await fetch(url, { redirect: "follow" });
+  if (!res.ok || !res.body) throw new Error(`Download failed: ${res.status} ${res.statusText}`);
+
+  const out = createWriteStream(dest);
+  await pipeline(res.body as unknown as NodeJS.ReadableStream, out);
+  console.log(`Saved to ${dest}`);
+}
+
+// ─── TSV parsing ──────────────────────────────────────────────────────────────
+
+async function* readTSV(
+  filePath: string
+): AsyncGenerator<Record<string, string>> {
+  const rl = readline.createInterface({
+    input: createReadStream(filePath),
+    crlfDelay: Infinity,
+  });
+
+  let headers: string[] = [];
+  let isHeader = true;
+
+  for await (const line of rl) {
+    if (isHeader) {
+      headers = line.split("\t");
+      isHeader = false;
+      continue;
+    }
+    if (!line.trim()) continue;
+    const cols = line.split("\t");
+    const row: Record<string, string> = {};
+    for (let i = 0; i < headers.length; i++) {
+      row[headers[i]] = cols[i] ?? "";
+    }
+    yield row;
+  }
+}
+
+// ─── Batch helper ─────────────────────────────────────────────────────────────
+
+async function batchInsert<T>(
+  items: T[],
+  insertFn: (batch: T[]) => Promise<void>
+): Promise<void> {
+  for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    await insertFn(items.slice(i, i + BATCH_SIZE));
+  }
+}
+
+// ─── Import functions ─────────────────────────────────────────────────────────
+
+async function importCompetitions(filePath: string): Promise<void> {
+  console.log("Importing competitions...");
+  await sql`TRUNCATE competitions CASCADE`;
+
+  const rows: {
+    id: string; name: string; city_name: string;
+    country_id: string; start_date: string; end_date: string;
+  }[] = [];
+
+  for await (const row of readTSV(filePath)) {
+    rows.push({
+      id: row["id"],
+      name: row["name"],
+      city_name: row["cityName"] ?? "",
+      country_id: row["countryId"] ?? "",
+      start_date: row["start_date"] ?? "",
+      end_date: row["end_date"] ?? "",
+    });
+  }
+
+  await batchInsert(rows, async (batch) => {
+    await sql`
+      INSERT INTO competitions ${sql(batch)}
+      ON CONFLICT (id) DO UPDATE SET
+        name       = EXCLUDED.name,
+        city_name  = EXCLUDED.city_name,
+        country_id = EXCLUDED.country_id,
+        start_date = EXCLUDED.start_date,
+        end_date   = EXCLUDED.end_date
+    `;
+  });
+
+  console.log(`  Imported ${rows.length} competitions`);
+}
+
+async function importPersons(filePath: string): Promise<Set<string>> {
+  console.log("Importing Swiss persons...");
+  await sql`DELETE FROM persons WHERE country_id = ${COUNTRY}`;
+
+  const swissIds = new Set<string>();
+  const rows: { wca_id: string; sub_id: number; name: string; country_id: string }[] = [];
+
+  for await (const row of readTSV(filePath)) {
+    if (row["countryId"] !== COUNTRY) continue;
+    swissIds.add(row["id"]);
+    rows.push({
+      wca_id: row["id"],
+      sub_id: Number(row["subid"]) || 1,
+      name: row["name"],
+      country_id: row["countryId"],
+    });
+  }
+
+  await batchInsert(rows, async (batch) => {
+    await sql`
+      INSERT INTO persons ${sql(batch)}
+      ON CONFLICT (wca_id, sub_id) DO UPDATE SET
+        name       = EXCLUDED.name,
+        country_id = EXCLUDED.country_id
+    `;
+  });
+
+  console.log(`  Imported ${rows.length} persons`);
+  return swissIds;
+}
+
+async function importResults(filePath: string): Promise<void> {
+  console.log("Importing Swiss results...");
+  await sql`DELETE FROM results WHERE person_country_id = ${COUNTRY}`;
+
+  const rows: {
+    competition_id: string; event_id: string; round_type_id: string;
+    pos: number; best: number; average: number; person_name: string;
+    person_id: string; person_country_id: string; format_id: string;
+    regional_single_record: string | null; regional_average_record: string | null;
+  }[] = [];
+
+  for await (const row of readTSV(filePath)) {
+    if (row["personCountryId"] !== COUNTRY) continue;
+
+    rows.push({
+      competition_id: row["competitionId"],
+      event_id: row["eventId"],
+      round_type_id: row["roundTypeId"] ?? "",
+      pos: Number(row["pos"]) || 0,
+      best: Number(row["best"]) || 0,
+      average: Number(row["average"]) || 0,
+      person_name: row["personName"],
+      person_id: row["personId"],
+      person_country_id: row["personCountryId"],
+      format_id: row["formatId"] ?? "",
+      regional_single_record: row["regionalSingleRecord"] || null,
+      regional_average_record: row["regionalAverageRecord"] || null,
+    });
+  }
+
+  await batchInsert(rows, async (batch) => {
+    await sql`INSERT INTO results ${sql(batch)}`;
+  });
+
+  console.log(`  Imported ${rows.length} results`);
+}
+
+async function importRanks(
+  filePath: string,
+  table: "ranks_single" | "ranks_average",
+  swissIds: Set<string>
+): Promise<void> {
+  console.log(`Importing ${table}...`);
+  await sql`DELETE FROM ${sql(table)} WHERE person_id = ANY(${[...swissIds]})`;
+
+  const rows: {
+    person_id: string; event_id: string; best: number;
+    world_rank: number; continent_rank: number; country_rank: number;
+  }[] = [];
+
+  for await (const row of readTSV(filePath)) {
+    if (!swissIds.has(row["personId"])) continue;
+    rows.push({
+      person_id: row["personId"],
+      event_id: row["eventId"],
+      best: Number(row["best"]) || 0,
+      world_rank: Number(row["worldRank"]) || 0,
+      continent_rank: Number(row["continentRank"]) || 0,
+      country_rank: Number(row["countryRank"]) || 0,
+    });
+  }
+
+  await batchInsert(rows, async (batch) => {
+    await sql`
+      INSERT INTO ${sql(table)} ${sql(batch)}
+      ON CONFLICT (person_id, event_id) DO UPDATE SET
+        best           = EXCLUDED.best,
+        world_rank     = EXCLUDED.world_rank,
+        continent_rank = EXCLUDED.continent_rank,
+        country_rank   = EXCLUDED.country_rank
+    `;
+  });
+
+  console.log(`  Imported ${rows.length} ${table} entries`);
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
+async function main() {
+  const tmpDir = join(tmpdir(), `wca-import-${Date.now()}`);
+  const zipPath = join(tmpDir, "WCA_export.zip");
+  const extractDir = join(tmpDir, "extracted");
+
+  await mkdir(tmpDir, { recursive: true });
+  await mkdir(extractDir, { recursive: true });
+
+  try {
+    await download(WCA_EXPORT_URL, zipPath);
+
+    console.log("Extracting ZIP...");
+    const zip = new AdmZip(zipPath);
+    zip.extractAllTo(extractDir, true);
+
+    const file = (name: string) => join(extractDir, name);
+
+    const swissIds = await importPersons(file("WCA_export_Persons.tsv"));
+    await importCompetitions(file("WCA_export_Competitions.tsv"));
+    await importResults(file("WCA_export_Results.tsv"));
+    await importRanks(file("WCA_export_RanksSingle.tsv"), "ranks_single", swissIds);
+    await importRanks(file("WCA_export_RanksAverage.tsv"), "ranks_average", swissIds);
+
+    await sql`
+      INSERT INTO import_metadata (key, value, updated_at)
+      VALUES ('imported_at', NOW()::text, NOW())
+      ON CONFLICT (key) DO UPDATE SET value = NOW()::text, updated_at = NOW()
+    `;
+
+    console.log("\nImport complete!");
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+    await sql.end();
+  }
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

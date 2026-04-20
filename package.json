@@ -1,10 +1,32 @@
 {
-    "type": "module",
-    "scripts": {
-      "start": "node server.js",
-      "build:data": "node fetchAndBuild.js"
-    },
-    "dependencies": {
-      "express": "^4.19.2"
-    }
+  "name": "wca-pr-collector",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:setup": "tsx scripts/setup-db.ts",
+    "db:import": "tsx scripts/import-wca.ts"
+  },
+  "dependencies": {
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "postgres": "^3.4.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "adm-zip": "^0.5.16",
+    "@types/adm-zip": "^0.5.5",
+    "autoprefixer": "^10.4.20",
+    "dotenv": "^16.4.5",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.14",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
   }
+}
