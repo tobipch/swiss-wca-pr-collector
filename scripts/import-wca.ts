@@ -287,8 +287,8 @@ async function main() {
     const swissIds = await importPersons(findTsv("Persons"));
     await importCompetitions(findTsv("Competitions"));
     await importResults(findTsv("Results"));
-    await importRanks(findTsv("RanksSingle"), "ranks_single", swissIds);
-    await importRanks(findTsv("RanksAverage"), "ranks_average", swissIds);
+    await importRanks(findTsv("ranks_single"), "ranks_single", swissIds);
+    await importRanks(findTsv("ranks_average"), "ranks_average", swissIds);
 
     await sql`
       INSERT INTO import_metadata (key, value, updated_at)
