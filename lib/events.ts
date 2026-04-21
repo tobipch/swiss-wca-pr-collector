@@ -19,7 +19,7 @@ export const EVENT_NAMES: Record<string, string> = {
 };
 
 // Events where the "average" result is a Mean of 3, not an Ao5
-export const MEAN_EVENTS = new Set(["666", "777", "333fm"]);
+export const MEAN_EVENTS = new Set(["666", "777", "333fm", "444bf", "555bf"]);
 
 export const EVENT_ORDER = [
   "333", "222", "444", "555", "666", "777",

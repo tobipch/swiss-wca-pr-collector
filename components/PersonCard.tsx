@@ -1,58 +1,140 @@
+"use client";
+
+import { useState } from "react";
 import type { PersonPRs, PR } from "@/lib/queries";
 import { eventName, eventIconUrl, EVENT_ORDER, typeLabel } from "@/lib/events";
 import { formatTime } from "@/lib/format";
 
 interface Props {
   person: PersonPRs;
+  initialOpen?: boolean;
+  highlightEvent?: string;
 }
 
-export default function PersonCard({ person }: Props) {
-  // Group PRs by event, preserving EVENT_ORDER
-  const byEvent = new Map<string, { single?: PR; average?: PR }>();
+interface DedupedPR {
+  pr: PR;
+  prevTime?: number;
+}
+
+export default function PersonCard({ person, initialOpen = true, highlightEvent }: Props) {
+  const [open, setOpen] = useState(initialOpen);
+
+  // Deduplicate: for each (eventId, type) keep the most recent PR; if same
+  // date, keep the better (lower) time. The displaced entry becomes prevTime.
+  const byEventType = new Map<string, PR[]>();
   for (const pr of person.prs) {
-    if (!byEvent.has(pr.eventId)) byEvent.set(pr.eventId, {});
-    const entry = byEvent.get(pr.eventId)!;
-    if (pr.type === "single") entry.single = pr;
-    else entry.average = pr;
+    const key = `${pr.eventId}:${pr.type}`;
+    if (!byEventType.has(key)) byEventType.set(key, []);
+    byEventType.get(key)!.push(pr);
   }
 
-  const eventGroups = [...byEvent.entries()].sort(
-    ([a], [b]) =>
-      (EVENT_ORDER.indexOf(a) === -1 ? 99 : EVENT_ORDER.indexOf(a)) -
-      (EVENT_ORDER.indexOf(b) === -1 ? 99 : EVENT_ORDER.indexOf(b))
-  );
+  const dedupedPRs: DedupedPR[] = [];
+  for (const prs of Array.from(byEventType.values())) {
+    const sorted = [...prs].sort((a, b) => {
+      const dateDiff = b.endDate.localeCompare(a.endDate);
+      if (dateDiff !== 0) return dateDiff;
+      return a.time - b.time;
+    });
+    const current = sorted[0];
+    const prevTime = sorted.length > 1 ? sorted[1].time : current.prevTime;
+    dedupedPRs.push({ pr: current, prevTime });
+  }
+
+  // Re-group by eventId for row display
+  const byEvent = new Map<string, DedupedPR[]>();
+  for (const item of dedupedPRs) {
+    if (!byEvent.has(item.pr.eventId)) byEvent.set(item.pr.eventId, []);
+    byEvent.get(item.pr.eventId)!.push(item);
+  }
+
+  const eventGroups = Array.from(byEvent.entries()).sort(([aId, aItems], [bId, bItems]) => {
+    const minRank = (items: DedupedPR[], key: "nr" | "cr" | "wr") =>
+      Math.min(...items.map((i) => i.pr[key] ?? Infinity));
+    const diff =
+      minRank(aItems, "nr") - minRank(bItems, "nr") ||
+      minRank(aItems, "cr") - minRank(bItems, "cr") ||
+      minRank(aItems, "wr") - minRank(bItems, "wr");
+    if (diff !== 0) return diff;
+    return (
+      (EVENT_ORDER.indexOf(aId) === -1 ? 99 : EVENT_ORDER.indexOf(aId)) -
+      (EVENT_ORDER.indexOf(bId) === -1 ? 99 : EVENT_ORDER.indexOf(bId))
+    );
+  });
 
   return (
     <div
       id={person.personId}
-      className="bg-white rounded-xl border border-gray-200 p-5 scroll-mt-4"
+      className="bg-white rounded-xl border border-gray-200 scroll-mt-4 overflow-hidden"
     >
-      <div className="flex items-center justify-between mb-4">
-        <a
-          href={`https://www.worldcubeassociation.org/persons/${person.personId}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-semibold text-gray-900 hover:text-blue-600 transition-colors"
-        >
-          {person.personName}
-        </a>
-        <span className="text-xs text-gray-400 font-mono">{person.personId}</span>
+      {/* Accordion header */}
+      <div
+        className="flex items-center justify-between px-5 py-4 cursor-pointer select-none hover:bg-gray-50 transition-colors"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <a
+            href={`https://www.worldcubeassociation.org/persons/${person.personId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-gray-900 hover:text-blue-600 transition-colors truncate"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {person.personName}
+          </a>
+          <span className="text-xs text-gray-400 font-mono shrink-0">
+            {person.personId}
+          </span>
+        </div>
+        <ChevronIcon open={open} />
       </div>
 
-      <div className="flex flex-col gap-2">
-        {eventGroups.map(([eventId, { single, average }]) => (
-          <div key={eventId} className="flex gap-2">
-            {single && <PRBadge pr={single} personId={person.personId} />}
-            {average && <PRBadge pr={average} personId={person.personId} />}
+      {/* Collapsible body */}
+      {open && (
+        <div className="px-5 pb-5 border-t border-gray-100">
+          <div className="flex flex-col gap-2 pt-3">
+            {eventGroups.map(([eventId, items]) => {
+              const dimmed = highlightEvent != null && eventId !== highlightEvent;
+              return (
+                <div
+                  key={eventId}
+                  className={`flex gap-2 flex-wrap transition-opacity duration-200 ${dimmed ? "opacity-30" : ""}`}
+                >
+                  {items.map((item, i) => (
+                    <PRBadge
+                      key={`${item.pr.type}-${item.pr.competitionId}-${i}`}
+                      pr={item.pr}
+                      personId={person.personId}
+                      prevTime={item.prevTime}
+                    />
+                  ))}
+                </div>
+              );
+            })}
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function PRBadge({ pr, personId }: { pr: PR; personId: string }) {
-  const href = `https://www.worldcubeassociation.org/persons/${personId}?event=${pr.eventId}`;
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`w-5 h-5 text-gray-400 transition-transform shrink-0 ml-2 ${open ? "" : "-rotate-90"}`}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={2}
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+    </svg>
+  );
+}
+
+function PRBadge({ pr, personId, prevTime }: { pr: PR; personId: string; prevTime?: number }) {
+  const href = pr.liveUrl
+    ? pr.liveUrl
+    : `https://www.worldcubeassociation.org/persons/${personId}?event=${pr.eventId}`;
   const isSingle = pr.type === "single";
 
   const colors = isSingle
@@ -61,12 +143,15 @@ function PRBadge({ pr, personId }: { pr: PR; personId: string }) {
 
   const typeColor = isSingle ? "text-blue-500" : "text-orange-500";
 
+  const record = pr.regionalRecord && pr.regionalRecord !== "PR" ? pr.regionalRecord : null;
+  const glow = record ? "shadow-[0_0_12px_4px_rgba(34,197,94,0.5)]" : "";
+
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className={`group flex flex-col gap-1 border rounded-lg px-3 py-2 transition-colors min-w-[8rem] flex-1 max-w-[12rem] ${colors}`}
+      className={`group flex flex-col gap-1 border rounded-lg px-3 py-2 transition-colors min-w-[9rem] flex-1 max-w-[14rem] ${colors} ${glow}`}
     >
       {/* Event header */}
       <div className="flex items-center gap-1.5">
@@ -91,9 +176,16 @@ function PRBadge({ pr, personId }: { pr: PR; personId: string }) {
         {formatTime(pr.time, pr.eventId, pr.type)}
       </span>
 
-      {/* Rankings */}
+      {/* Previous PR — directly below the time */}
+      {prevTime != null && prevTime > 0 && (
+        <span className="text-xs text-gray-400 -mt-0.5">
+          vorher <span className="font-mono">{formatTime(prevTime, pr.eventId, pr.type)}</span>
+        </span>
+      )}
+
+      {/* Rankings / record badges — "PR" tag is suppressed (redundant) */}
       <div className="flex gap-1 flex-wrap">
-        {pr.regionalRecord && (
+        {pr.regionalRecord && pr.regionalRecord !== "PR" && (
           <RecordHighlight record={pr.regionalRecord} />
         )}
         {pr.wr && <RankBadge label="WR" value={pr.wr} />}

@@ -1,13 +1,24 @@
-import { Suspense } from "react";
-import { fetchPRs, getImportDate } from "@/lib/queries";
+import { cache, Suspense } from "react";
+import { fetchPRs, getImportDate, getAllSwissRanks, getDbCompetitionIds } from "@/lib/queries";
+import { fetchLivePRs } from "@/lib/wca-live";
+import type { PersonPRs, RankMap } from "@/lib/queries";
 import PRList from "@/components/PRList";
 import DaysSelector from "@/components/DaysSelector";
 
-const VALID_DAYS = [7, 14, 30, 60, 90];
-const DEFAULT_DAYS = 30;
+const VALID_DAYS = [3, 7, 14, 30];
+const DEFAULT_DAYS = 3;
+
+// Deduplicate fetchLivePRs within a single render (React request cache)
+const getLivePRs = cache(fetchLivePRs);
 
 interface Props {
   searchParams: Promise<{ days?: string }>;
+}
+
+interface LiveProps {
+  days: number;
+  dbCompIds: Set<string>;
+  ranks: RankMap;
 }
 
 export default async function Home({ searchParams }: Props) {
@@ -16,52 +27,134 @@ export default async function Home({ searchParams }: Props) {
     ? Number(params.days)
     : DEFAULT_DAYS;
 
-  const [persons, importDate] = await Promise.all([
+  const [dbPersons, importDate, ranks, dbCompIds] = await Promise.all([
     fetchPRs(days).catch(() => null),
     getImportDate(),
+    getAllSwissRanks().catch(() => ({ single: new Map(), average: new Map() })),
+    getDbCompetitionIds().catch(() => new Set<string>()),
   ]);
 
-  const totalPRs = persons?.reduce((sum, p) => sum + p.prs.length, 0) ?? 0;
-
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
+    <div className="max-w-5xl mx-auto px-4 py-8">
       <header className="mb-8">
         <div className="flex items-center gap-3 mb-1">
           <span className="text-3xl">🇨🇭</span>
-          <h1 className="text-3xl font-bold tracking-tight">WCA PR Collector</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Swiss WCA PR Collector</h1>
         </div>
         <p className="text-gray-500 text-sm">
           Persönliche Rekorde Schweizer Speedcuber aus offiziellen WCA-Competitions
         </p>
         {importDate && (
           <p className="text-gray-400 text-xs mt-1">
-            Datenbankstand: {new Date(importDate).toLocaleDateString("de-CH")}
+            Datenbankstand: {formatDate(new Date(importDate))}
           </p>
         )}
+        <Suspense
+          fallback={
+            <p className="text-gray-400 text-xs mt-0.5">WCA-Live Stand: wird geladen.</p>
+          }
+        >
+          <LiveTimestamp days={days} dbCompIds={dbCompIds} ranks={ranks} />
+        </Suspense>
       </header>
 
       <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-6">
         <DaysSelector current={days} options={VALID_DAYS} />
-        {persons && (
-          <p className="text-sm text-gray-500">
-            <span className="font-semibold text-gray-800">{totalPRs}</span> PRs von{" "}
-            <span className="font-semibold text-gray-800">{persons.length}</span> Cubern
-            in den letzten <span className="font-semibold text-gray-800">{days}</span> Tagen
-          </p>
-        )}
+        <Suspense>
+          <LiveCount days={days} dbPersons={dbPersons} dbCompIds={dbCompIds} ranks={ranks} />
+        </Suspense>
       </div>
 
       <Suspense fallback={<LoadingState />}>
-        {persons === null ? (
-          <ErrorState />
-        ) : persons.length === 0 ? (
-          <EmptyState days={days} />
-        ) : (
-          <PRList persons={persons} />
-        )}
+        <LiveContent days={days} dbPersons={dbPersons} dbCompIds={dbCompIds} ranks={ranks} />
       </Suspense>
     </div>
   );
+}
+
+function pad(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function formatDate(d: Date) {
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
+}
+
+function formatDateTime(d: Date) {
+  return `${formatDate(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function LiveTimestamp({ days, dbCompIds, ranks }: LiveProps) {
+  await getLivePRs(days, dbCompIds, ranks).catch(() => []);
+  return (
+    <p className="text-gray-400 text-xs mt-0.5">
+      WCA-Live Stand: {formatDateTime(new Date())}
+    </p>
+  );
+}
+
+async function LiveCount({
+  days,
+  dbPersons,
+  dbCompIds,
+  ranks,
+}: LiveProps & { dbPersons: PersonPRs[] | null }) {
+  const livePRs = await getLivePRs(days, dbCompIds, ranks).catch(() => []);
+  const persons = mergeLive(dbPersons, livePRs);
+  if (!persons) return null;
+  const totalPRs = persons.reduce((sum, p) => sum + p.prs.length, 0);
+  return (
+    <p className="text-sm text-gray-500">
+      <span className="font-semibold text-gray-800">{totalPRs}</span> PRs von{" "}
+      <span className="font-semibold text-gray-800">{persons.length}</span> Cubern
+      in den letzten <span className="font-semibold text-gray-800">{days}</span> Tagen
+    </p>
+  );
+}
+
+async function LiveContent({
+  days,
+  dbPersons,
+  dbCompIds,
+  ranks,
+}: LiveProps & { dbPersons: PersonPRs[] | null }) {
+  const livePRs = await getLivePRs(days, dbCompIds, ranks).catch(() => []);
+  const persons = mergeLive(dbPersons, livePRs);
+
+  if (persons === null) return <ErrorState />;
+  if (persons.length === 0) return <EmptyState days={days} />;
+  return <PRList persons={persons} />;
+}
+
+function mergeLive(
+  db: PersonPRs[] | null,
+  live: PersonPRs[]
+): PersonPRs[] | null {
+  if (db === null) return null;
+  if (live.length === 0) return db;
+
+  const result = db.map((p) => ({ ...p, prs: [...p.prs] }));
+  const byId = new Map(result.map((p) => [p.personId, p]));
+
+  for (const lp of live) {
+    const existing = byId.get(lp.personId);
+    if (existing) {
+      existing.prs.push(...lp.prs);
+    } else {
+      result.push({ ...lp });
+    }
+  }
+
+  const minRank = (p: PersonPRs, key: "nr" | "cr" | "wr") =>
+    Math.min(...p.prs.map((pr) => pr[key] ?? Infinity));
+  result.sort(
+    (a, b) =>
+      minRank(a, "nr") - minRank(b, "nr") ||
+      minRank(a, "cr") - minRank(b, "cr") ||
+      minRank(a, "wr") - minRank(b, "wr")
+  );
+
+  return result;
 }
 
 function LoadingState() {

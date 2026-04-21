@@ -20,6 +20,8 @@ export interface PRRow {
   avg_nr: number | null;
   is_single_pr: boolean;
   is_avg_pr: boolean;
+  prev_single_best: number | null;
+  prev_avg_best: number | null;
 }
 
 export interface PersonPRs {
@@ -40,14 +42,20 @@ export interface PR {
   cr: number | null;
   nr: number | null;
   regionalRecord: string | null;
+  isLive?: boolean;
+  liveUrl?: string;  // WCA Live competitor page, e.g. /competitions/10400/competitors/905132
+  prevTime?: number; // previous best for this (event, type) before this competition
 }
 
-// Read pre-computed results from pr_cache — populated by the import script
+// Read pre-computed results from pr_cache — populated by the import script.
+// Falls back to a live SQL query if the cache doesn't have an entry for `days`
+// (e.g. a new day value added before the next import has run).
 export async function fetchPRs(days: number): Promise<PersonPRs[]> {
   const rows = await sql<{ result: PersonPRs[] }[]>`
     SELECT result FROM pr_cache WHERE days = ${days}
   `;
-  return rows[0]?.result ?? [];
+  if (rows[0]?.result) return rows[0].result;
+  return fetchPRsImpl(days);
 }
 
 // Full SQL query used by the import script to build the cache
@@ -72,7 +80,19 @@ export async function fetchPRsImpl(days: number): Promise<PersonPRs[]> {
       ra.continent_rank AS avg_cr,
       ra.country_rank   AS avg_nr,
       (r.best > 0 AND rs.best IS NOT NULL AND r.best = rs.best)       AS is_single_pr,
-      (r.average > 0 AND ra.best IS NOT NULL AND r.average = ra.best) AS is_avg_pr
+      (r.average > 0 AND ra.best IS NOT NULL AND r.average = ra.best) AS is_avg_pr,
+      (
+        SELECT MIN(r2.best) FROM results r2
+        WHERE r2.person_id = r.person_id
+          AND r2.event_id  = r.event_id
+          AND r2.best > r.best AND r2.best > 0
+      ) AS prev_single_best,
+      (
+        SELECT MIN(r2.average) FROM results r2
+        WHERE r2.person_id = r.person_id
+          AND r2.event_id  = r.event_id
+          AND r2.average > r.average AND r2.average > 0
+      ) AS prev_avg_best
     FROM results r
     JOIN competitions c ON r.competition_id = c.id
     LEFT JOIN ranks_single rs
@@ -103,6 +123,38 @@ export async function getImportDate(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+export interface RankMap {
+  single: Map<string, number>;   // "personId:eventId" → best
+  average: Map<string, number>;
+}
+
+export async function getAllSwissRanks(): Promise<RankMap> {
+  const [singles, averages] = await Promise.all([
+    sql<{ person_id: string; event_id: string; best: number }[]>`
+      SELECT person_id, event_id, best FROM ranks_single
+    `,
+    sql<{ person_id: string; event_id: string; best: number }[]>`
+      SELECT person_id, event_id, best FROM ranks_average
+    `,
+  ]);
+  const single = new Map<string, number>();
+  const average = new Map<string, number>();
+  for (const r of singles) single.set(`${r.person_id}:${r.event_id}`, r.best);
+  for (const r of averages) average.set(`${r.person_id}:${r.event_id}`, r.best);
+  return { single, average };
+}
+
+export async function getDbCompetitionIds(): Promise<Set<string>> {
+  // Only competitions with actual results are considered "in the DB".
+  // A competition row may exist before results are imported, so filtering
+  // by the results table prevents us from skipping live data for competitions
+  // that are registered but not yet fully exported.
+  const rows = await sql<{ competition_id: string }[]>`
+    SELECT DISTINCT competition_id FROM results
+  `;
+  return new Set(rows.map((r) => r.competition_id));
 }
 
 function nullStr(val: string | null): string | null {
@@ -136,6 +188,7 @@ function groupByPerson(rows: PRRow[]): PersonPRs[] {
         cr: row.single_cr,
         nr: row.single_nr,
         regionalRecord: nullStr(row.regional_single_record),
+        prevTime: row.prev_single_best ?? undefined,
       });
     }
 
@@ -152,6 +205,7 @@ function groupByPerson(rows: PRRow[]): PersonPRs[] {
         cr: row.avg_cr,
         nr: row.avg_nr,
         regionalRecord: nullStr(row.regional_average_record),
+        prevTime: row.prev_avg_best ?? undefined,
       });
     }
   }
@@ -163,4 +217,52 @@ function groupByPerson(rows: PRRow[]): PersonPRs[] {
         Math.min(...p.prs.map((pr) => pr.nr ?? Infinity));
       return minNr(a) - minNr(b);
     });
+}
+
+// ─── Virtual rankings ─────────────────────────────────────────────────────────
+
+interface VirtualRanking { wr: number | null; cr: number | null }
+
+/**
+ * For each (eventId, type, time) triple in `prs`, returns the virtual world
+ * rank and European continental rank that result would have in the WCA DB.
+ * Uses the rank_brackets table (populated by the import script).
+ * Returns an empty map on error (e.g. table not yet created).
+ */
+export async function getVirtualRankings(
+  prs: Array<{ eventId: string; type: "single" | "average"; time: number }>
+): Promise<Map<string, VirtualRanking>> {
+  if (prs.length === 0) return new Map();
+  try {
+    const eventIds = prs.map((p) => p.eventId);
+    const types    = prs.map((p) => p.type);
+    const times    = prs.map((p) => p.time);
+
+    const rows = await sql<
+      { event_id: string; type: string; time: number; virtual_wr: number | null; virtual_cr: number | null }[]
+    >`
+      SELECT v.event_id, v.type, v.time::int,
+        MIN(rb.world_rank)  AS virtual_wr,
+        MIN(rb.europe_rank) AS virtual_cr
+      FROM unnest(
+        ${sql.array(eventIds)}::text[],
+        ${sql.array(types)}::text[],
+        ${sql.array(times)}::int[]
+      ) AS v(event_id, type, time)
+      LEFT JOIN rank_brackets rb
+        ON rb.event_id = v.event_id
+       AND rb.type     = v.type
+       AND rb.best    >= v.time
+      GROUP BY v.event_id, v.type, v.time
+    `;
+
+    return new Map(
+      rows.map((r) => [
+        `${r.event_id}:${r.type}:${r.time}`,
+        { wr: r.virtual_wr, cr: r.virtual_cr },
+      ])
+    );
+  } catch {
+    return new Map();
+  }
 }

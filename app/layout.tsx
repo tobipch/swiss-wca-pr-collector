@@ -5,7 +5,7 @@ import "./globals.css";
 const geist = Geist({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "WCA PR Collector – Switzerland",
+  title: "Swiss WCA PR Collector",
   description: "Personal records of Swiss speedcubers from recent WCA competitions",
 };
 
