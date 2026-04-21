@@ -42,6 +42,7 @@ export interface PR {
   regionalRecord: string | null;
   isLive?: boolean;
   liveUrl?: string;  // WCA Live competitor page, e.g. /competitions/10400/competitors/905132
+  prevTime?: number; // previous best for this (event, type) before this competition
 }
 
 // Read pre-computed results from pr_cache — populated by the import script

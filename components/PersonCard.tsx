@@ -11,23 +11,49 @@ interface Props {
   highlightEvent?: string;
 }
 
+interface DedupedPR {
+  pr: PR;
+  prevTime?: number;
+}
+
 export default function PersonCard({ person, initialOpen = true, highlightEvent }: Props) {
   const [open, setOpen] = useState(initialOpen);
 
-  // Group PRs by event (multiple PRs per event are allowed, e.g. DB + live)
-  const byEvent = new Map<string, PR[]>();
+  // Deduplicate: for each (eventId, type) keep the most recent PR; if same
+  // date, keep the better (lower) time. The displaced entry becomes prevTime.
+  const byEventType = new Map<string, PR[]>();
   for (const pr of person.prs) {
-    if (!byEvent.has(pr.eventId)) byEvent.set(pr.eventId, []);
-    byEvent.get(pr.eventId)!.push(pr);
+    const key = `${pr.eventId}:${pr.type}`;
+    if (!byEventType.has(key)) byEventType.set(key, []);
+    byEventType.get(key)!.push(pr);
   }
 
-  const eventGroups = Array.from(byEvent.entries()).sort(([aId, aPrs], [bId, bPrs]) => {
-    const minRank = (prs: PR[], key: "nr" | "cr" | "wr") =>
-      Math.min(...prs.map((p) => p[key] ?? Infinity));
+  const dedupedPRs: DedupedPR[] = [];
+  for (const prs of Array.from(byEventType.values())) {
+    const sorted = [...prs].sort((a, b) => {
+      const dateDiff = b.endDate.localeCompare(a.endDate);
+      if (dateDiff !== 0) return dateDiff;
+      return a.time - b.time;
+    });
+    const current = sorted[0];
+    const prevTime = sorted.length > 1 ? sorted[1].time : current.prevTime;
+    dedupedPRs.push({ pr: current, prevTime });
+  }
+
+  // Re-group by eventId for row display
+  const byEvent = new Map<string, DedupedPR[]>();
+  for (const item of dedupedPRs) {
+    if (!byEvent.has(item.pr.eventId)) byEvent.set(item.pr.eventId, []);
+    byEvent.get(item.pr.eventId)!.push(item);
+  }
+
+  const eventGroups = Array.from(byEvent.entries()).sort(([aId, aItems], [bId, bItems]) => {
+    const minRank = (items: DedupedPR[], key: "nr" | "cr" | "wr") =>
+      Math.min(...items.map((i) => i.pr[key] ?? Infinity));
     const diff =
-      minRank(aPrs, "nr") - minRank(bPrs, "nr") ||
-      minRank(aPrs, "cr") - minRank(bPrs, "cr") ||
-      minRank(aPrs, "wr") - minRank(bPrs, "wr");
+      minRank(aItems, "nr") - minRank(bItems, "nr") ||
+      minRank(aItems, "cr") - minRank(bItems, "cr") ||
+      minRank(aItems, "wr") - minRank(bItems, "wr");
     if (diff !== 0) return diff;
     return (
       (EVENT_ORDER.indexOf(aId) === -1 ? 99 : EVENT_ORDER.indexOf(aId)) -
@@ -66,18 +92,19 @@ export default function PersonCard({ person, initialOpen = true, highlightEvent 
       {open && (
         <div className="px-5 pb-5 border-t border-gray-100">
           <div className="flex flex-col gap-2 pt-3">
-            {eventGroups.map(([eventId, prs]) => {
+            {eventGroups.map(([eventId, items]) => {
               const dimmed = highlightEvent != null && eventId !== highlightEvent;
               return (
                 <div
                   key={eventId}
                   className={`flex gap-2 flex-wrap transition-opacity duration-200 ${dimmed ? "opacity-30" : ""}`}
                 >
-                  {prs.map((pr: PR, i: number) => (
+                  {items.map((item, i) => (
                     <PRBadge
-                      key={`${pr.type}-${pr.competitionId}-${i}`}
-                      pr={pr}
+                      key={`${item.pr.type}-${item.pr.competitionId}-${i}`}
+                      pr={item.pr}
                       personId={person.personId}
+                      prevTime={item.prevTime}
                     />
                   ))}
                 </div>
@@ -104,7 +131,7 @@ function ChevronIcon({ open }: { open: boolean }) {
   );
 }
 
-function PRBadge({ pr, personId }: { pr: PR; personId: string }) {
+function PRBadge({ pr, personId, prevTime }: { pr: PR; personId: string; prevTime?: number }) {
   const href = pr.liveUrl
     ? pr.liveUrl
     : `https://www.worldcubeassociation.org/persons/${personId}?event=${pr.eventId}`;
@@ -146,9 +173,9 @@ function PRBadge({ pr, personId }: { pr: PR; personId: string }) {
         {formatTime(pr.time, pr.eventId, pr.type)}
       </span>
 
-      {/* Rankings / badges */}
+      {/* Rankings / record badges — "PR" tag is suppressed (redundant) */}
       <div className="flex gap-1 flex-wrap">
-        {pr.regionalRecord && (
+        {pr.regionalRecord && pr.regionalRecord !== "PR" && (
           <RecordHighlight record={pr.regionalRecord} />
         )}
         {pr.wr && <RankBadge label="WR" value={pr.wr} />}
@@ -160,6 +187,13 @@ function PRBadge({ pr, personId }: { pr: PR; personId: string }) {
       <span className="text-xs text-gray-400 group-hover:text-gray-600 truncate transition-colors">
         {pr.competitionName}
       </span>
+
+      {/* Previous PR — shown when known */}
+      {prevTime != null && prevTime > 0 && (
+        <span className="text-xs text-gray-300 font-mono">
+          vorher {formatTime(prevTime, pr.eventId, pr.type)}
+        </span>
+      )}
     </a>
   );
 }

@@ -148,6 +148,20 @@ function isoDateMinus(days: number): string {
   return d.toISOString().split("T")[0];
 }
 
+function computeVirtualNr(
+  ranks: RankMap,
+  type: "single" | "average",
+  eventId: string,
+  time: number
+): number {
+  const table = type === "single" ? ranks.single : ranks.average;
+  let better = 0;
+  for (const [key, best] of Array.from(table.entries())) {
+    if (key.endsWith(`:${eventId}`) && best < time) better++;
+  }
+  return better + 1;
+}
+
 function addLivePR(
   map: Map<string, PersonPRs>,
   wcaId: string,
@@ -297,10 +311,11 @@ async function processCompetition(
               time: entry.best,
               wr: null,
               cr: null,
-              nr: null,
-              regionalRecord: entry.singleRecord,
+              nr: computeVirtualNr(ranks, "single", entry.eventId, entry.best),
+              regionalRecord: entry.singleRecord !== "PR" ? entry.singleRecord : null,
               isLive: true,
               liveUrl,
+              prevTime: dbBest ?? undefined,
             });
           }
         }
@@ -320,10 +335,11 @@ async function processCompetition(
               time: entry.average,
               wr: null,
               cr: null,
-              nr: null,
-              regionalRecord: entry.averageRecord,
+              nr: computeVirtualNr(ranks, "average", entry.eventId, entry.average),
+              regionalRecord: entry.averageRecord !== "PR" ? entry.averageRecord : null,
               isLive: true,
               liveUrl,
+              prevTime: dbAvgBest ?? undefined,
             });
           }
         }
