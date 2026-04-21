@@ -1,6 +1,7 @@
 /**
  * Temporary debug endpoint — remove once WCA Live integration is confirmed working.
  * Visit /api/debug-live?days=30 (or ?days=90 etc.)
+ * Optional: &comp=<WCA Live internal numeric id> to inspect a specific competition.
  */
 
 import { NextResponse } from "next/server";
@@ -14,11 +15,11 @@ function isoDateMinus(days: number): string {
   return d.toISOString().split("T")[0];
 }
 
-async function gql(query: string) {
+async function gql(query: string, variables?: Record<string, unknown>) {
   const res = await fetch(WCA_LIVE_API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query, variables }),
     cache: "no-store",
   });
   return res.json();
@@ -42,85 +43,100 @@ export async function GET(request: Request) {
   }
 
   // 2. Fetch competitions from WCA Live (include wca_id)
-  const compQuery = `{
-    competitions(from: "${from}") {
-      id
-      wca_id
-      name
-      start_date
-      end_date
-    }
-  }`;
-  const compJson = await gql(compQuery);
-  out.competitions_raw = compJson;
-
-  const competitions: { id: string; wca_id: string; name: string; start_date: string; end_date: string | null }[] =
-    compJson?.data?.competitions ?? [];
-  out.competition_count = competitions.length;
-  out.competitions = competitions;
-
-  // 3. Fetch detail + results for a specific competition (by internal WCA Live ID)
-  const targetId = compId ?? competitions[0]?.id;
-  if (targetId) {
-    out.fetching_detail_for = targetId;
-
-    const detailQuery = `{
-      competition(id: "${targetId}") {
+  const compQuery = `
+    query($from: Date) {
+      competitions(from: $from) {
         id
         wca_id
         name
         start_date
         end_date
-        competition_events {
-          event { id }
-          rounds {
+      }
+    }
+  `;
+  const compJson = await gql(compQuery, { from });
+  out.competitions_errors = compJson?.errors ?? null;
+
+  const competitions: {
+    id: string;
+    wca_id: string;
+    name: string;
+    start_date: string;
+    end_date: string | null;
+  }[] = compJson?.data?.competitions ?? [];
+  out.competition_count = competitions.length;
+  out.competitions = competitions;
+
+  // 3. For a specific competition, fetch competitors (step 1 of new 2-step flow)
+  const targetId = compId ?? competitions[0]?.id;
+  if (targetId) {
+    out.fetching_competitors_for = targetId;
+
+    const competitorsQuery = `
+      query($id: ID!) {
+        competition(id: $id) {
+          id
+          wca_id
+          name
+          start_date
+          end_date
+          competitors {
+            id
+            wca_id
+            name
+            country { iso2 }
+          }
+        }
+      }
+    `;
+    const competitorsJson = await gql(competitorsQuery, { id: targetId });
+    out.competitors_errors = competitorsJson?.errors ?? null;
+
+    const comp = competitorsJson?.data?.competition;
+    if (comp) {
+      out.competition_detail = {
+        id: comp.id,
+        wca_id: comp.wca_id,
+        name: comp.name,
+        total_competitors: comp.competitors?.length ?? 0,
+      };
+
+      const swissCompetitors = (comp.competitors ?? []).filter(
+        (c: { country: { iso2: string } | null }) => c.country?.iso2 === "CH"
+      );
+      out.swiss_competitor_count = swissCompetitors.length;
+      out.swiss_competitors = swissCompetitors.slice(0, 20);
+
+      // 4. Step 2: Batch-query results for the first few Swiss competitors
+      const sample = swissCompetitors.slice(0, 5);
+      if (sample.length > 0) {
+        const aliases = sample
+          .map(
+            (c: { id: string }, i: number) => `
+          p${i}: person(id: "${c.id}") {
+            id
+            wca_id
+            name
             results {
-              ranking
               best
               average
               single_record_tag
               average_record_tag
-              person {
-                wca_id
-                name
-                country { iso2 }
+              round {
+                id
+                competition_event {
+                  event { id }
+                }
               }
             }
-          }
-        }
+          }`
+          )
+          .join("\n");
+        const batchQuery = `query PersonBatch {${aliases}\n}`;
+        const batchJson = await gql(batchQuery);
+        out.person_batch_errors = batchJson?.errors ?? null;
+        out.person_batch = batchJson?.data ?? null;
       }
-    }`;
-
-    const detailJson = await gql(detailQuery);
-    out.detail_errors = detailJson?.errors ?? null;
-
-    const comp = detailJson?.data?.competition;
-    if (comp) {
-      const swissResults: unknown[] = [];
-      for (const ce of comp.competition_events ?? []) {
-        for (const round of ce.rounds ?? []) {
-          for (const r of round.results ?? []) {
-            if (r.person?.country?.iso2 === "CH") {
-              swissResults.push({
-                event: ce.event?.id,
-                person_name: r.person.name,
-                person_wca_id: r.person.wca_id,
-                best: r.best,
-                average: r.average,
-              });
-            }
-          }
-        }
-      }
-      out.swiss_results_found = swissResults.length;
-      out.swiss_results = swissResults;
-
-      // Also check total result count for the first event/round
-      const firstEvent = comp.competition_events?.[0];
-      const firstRound = firstEvent?.rounds?.[0];
-      out.first_event_id = firstEvent?.event?.id;
-      out.first_round_result_count = firstRound?.results?.length ?? 0;
-      out.first_round_sample = (firstRound?.results ?? []).slice(0, 2);
     }
   }
 

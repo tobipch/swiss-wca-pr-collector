@@ -2,6 +2,12 @@
  * Fetches personal records from WCA Live for ongoing competitions
  * (competitions that have not yet been exported to the official WCA database).
  *
+ * WCA Live enforces a GraphQL complexity limit of 5000. We stay under it by
+ * using a 2-step approach per competition:
+ *   1. Fetch the competitor list (country only) — low complexity.
+ *   2. Batch-query results for Swiss competitors using aliased `person(id: …)`
+ *      queries (small batches).
+ *
  * All errors are caught and return an empty array so the page degrades
  * gracefully when WCA Live is unavailable.
  */
@@ -10,6 +16,7 @@ import type { PersonPRs, PR, RankMap } from "./queries";
 
 const WCA_LIVE_API = "https://live.worldcubeassociation.org/api";
 const FETCH_TIMEOUT_MS = 8_000;
+const PERSON_BATCH_SIZE = 10;
 
 async function graphql<T>(
   query: string,
@@ -44,35 +51,35 @@ interface GqlCompetition {
   end_date: string | null;
 }
 
-interface GqlResult {
-  ranking: number;
+interface GqlCompetitor {
+  id: string;         // internal person id (numeric)
+  wca_id: string | null;
+  name: string;
+  country: { iso2: string } | null;
+}
+
+interface GqlCompetitionWithCompetitors extends GqlCompetition {
+  competitors: GqlCompetitor[];
+}
+
+interface GqlPersonResult {
   best: number;
   average: number;
   single_record_tag: string | null;
   average_record_tag: string | null;
-  person: {
-    wca_id: string | null;
-    name: string;
-    country: { iso2: string } | null;
+  round: {
+    id: string;
+    competition_event: {
+      event: { id: string };
+    };
   };
 }
 
-interface GqlRound {
-  results: GqlResult[];
-}
-
-interface GqlEvent {
+interface GqlPersonResults {
   id: string;
-  rounds: GqlRound[];
-}
-
-interface GqlCompetitionDetail {
-  id: string;
-  wca_id: string;
+  wca_id: string | null;
   name: string;
-  start_date: string;
-  end_date: string | null;
-  competition_events: { event: { id: string }; rounds: GqlRound[] }[];
+  results: GqlPersonResult[];
 }
 
 // ─── Queries ───────────────────────────────────────────────────────────────
@@ -89,34 +96,49 @@ const COMPETITIONS_QUERY = `
   }
 `;
 
-const COMPETITION_RESULTS_QUERY = `
-  query CompetitionResults($id: ID!) {
+const COMPETITION_COMPETITORS_QUERY = `
+  query CompetitionCompetitors($id: ID!) {
     competition(id: $id) {
       id
       wca_id
       name
       start_date
       end_date
-      competition_events {
-        event { id }
-        rounds {
-          results {
-            ranking
-            best
-            average
-            single_record_tag
-            average_record_tag
-            person {
-              wca_id
-              name
-              country { iso2 }
-            }
-          }
-        }
+      competitors {
+        id
+        wca_id
+        name
+        country { iso2 }
       }
     }
   }
 `;
+
+function buildPersonBatchQuery(personIds: string[]): string {
+  const aliases = personIds
+    .map(
+      (pid, i) => `
+    p${i}: person(id: "${pid}") {
+      id
+      wca_id
+      name
+      results {
+        best
+        average
+        single_record_tag
+        average_record_tag
+        round {
+          id
+          competition_event {
+            event { id }
+          }
+        }
+      }
+    }`
+    )
+    .join("\n");
+  return `query PersonBatch {${aliases}\n}`;
+}
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -136,6 +158,43 @@ function addLivePR(
     map.set(wcaId, { personId: wcaId, personName: name, prs: [] });
   }
   map.get(wcaId)!.prs.push(pr);
+}
+
+// For each (event, type) pick only the best result of the person in this competition
+interface BestByEvent {
+  eventId: string;
+  best: number;
+  average: number;
+  singleRecord: string | null;
+  averageRecord: string | null;
+}
+
+function reducePersonResults(results: GqlPersonResult[]): BestByEvent[] {
+  const byEvent = new Map<string, BestByEvent>();
+  for (const r of results) {
+    const eventId = r.round?.competition_event?.event?.id;
+    if (!eventId) continue;
+    const cur = byEvent.get(eventId);
+    if (!cur) {
+      byEvent.set(eventId, {
+        eventId,
+        best: r.best,
+        average: r.average,
+        singleRecord: r.single_record_tag,
+        averageRecord: r.average_record_tag,
+      });
+      continue;
+    }
+    if (r.best > 0 && (cur.best <= 0 || r.best < cur.best)) {
+      cur.best = r.best;
+      cur.singleRecord = r.single_record_tag ?? cur.singleRecord;
+    }
+    if (r.average > 0 && (cur.average <= 0 || r.average < cur.average)) {
+      cur.average = r.average;
+      cur.averageRecord = r.average_record_tag ?? cur.averageRecord;
+    }
+  }
+  return Array.from(byEvent.values());
 }
 
 // ─── Main export ───────────────────────────────────────────────────────────
@@ -169,78 +228,102 @@ export async function fetchLivePRs(
   const personMap = new Map<string, PersonPRs>();
 
   await Promise.all(
-    liveComps.map(async (comp) => {
-      let detail: GqlCompetitionDetail;
-      try {
-        const data = await graphql<{ competition: GqlCompetitionDetail }>(
-          COMPETITION_RESULTS_QUERY,
-          { id: comp.id }
-        );
-        detail = data.competition;
-      } catch {
-        return;
-      }
-      if (!detail) return;
-
-      for (const ce of detail.competition_events) {
-        const eventId = ce.event.id;
-        // Use the last round available (most recent = closest to final)
-        const lastRound = ce.rounds[ce.rounds.length - 1];
-        if (!lastRound) continue;
-
-        for (const result of lastRound.results) {
-          const { wca_id: wcaId, name, country } = result.person;
-          if (!wcaId || country?.iso2 !== "CH") continue;
-
-          const wcaCompId = detail.wca_id; // WCA string ID for links + dedup
-
-          // Single PR check
-          if (result.best > 0) {
-            const key = `${wcaId}:${eventId}`;
-            const dbBest = ranks.single.get(key);
-            if (!dbBest || result.best <= dbBest) {
-              addLivePR(personMap, wcaId, name, {
-                eventId,
-                competitionId: wcaCompId,
-                competitionName: detail.name,
-                cityName: "",
-                endDate: detail.end_date ?? detail.start_date,
-                type: "single",
-                time: result.best,
-                wr: null,
-                cr: null,
-                nr: null,
-                regionalRecord: result.single_record_tag ?? null,
-                isLive: true,
-              });
-            }
-          }
-
-          // Average PR check
-          if (result.average > 0) {
-            const key = `${wcaId}:${eventId}`;
-            const dbAvgBest = ranks.average.get(key);
-            if (!dbAvgBest || result.average <= dbAvgBest) {
-              addLivePR(personMap, wcaId, name, {
-                eventId,
-                competitionId: wcaCompId,
-                competitionName: detail.name,
-                cityName: "",
-                endDate: detail.end_date ?? detail.start_date,
-                type: "average",
-                time: result.average,
-                wr: null,
-                cr: null,
-                nr: null,
-                regionalRecord: result.average_record_tag ?? null,
-                isLive: true,
-              });
-            }
-          }
-        }
-      }
-    })
+    liveComps.map((comp) => processCompetition(comp, ranks, personMap))
   );
 
   return Array.from(personMap.values()).filter((p) => p.prs.length > 0);
+}
+
+async function processCompetition(
+  comp: GqlCompetition,
+  ranks: RankMap,
+  personMap: Map<string, PersonPRs>
+): Promise<void> {
+  let detail: GqlCompetitionWithCompetitors | undefined;
+  try {
+    const data = await graphql<{ competition: GqlCompetitionWithCompetitors }>(
+      COMPETITION_COMPETITORS_QUERY,
+      { id: comp.id }
+    );
+    detail = data.competition;
+  } catch {
+    return;
+  }
+  if (!detail) return;
+
+  const swissCompetitors = detail.competitors.filter(
+    (c) => c.country?.iso2 === "CH" && c.wca_id
+  );
+  if (swissCompetitors.length === 0) return;
+
+  const wcaCompId = detail.wca_id;
+  const endDate = detail.end_date ?? detail.start_date;
+  const compName = detail.name;
+
+  // Batch person queries to stay under the complexity limit
+  for (let i = 0; i < swissCompetitors.length; i += PERSON_BATCH_SIZE) {
+    const batch = swissCompetitors.slice(i, i + PERSON_BATCH_SIZE);
+    const query = buildPersonBatchQuery(batch.map((c) => c.id));
+
+    let batchData: Record<string, GqlPersonResults | null>;
+    try {
+      batchData = await graphql<Record<string, GqlPersonResults | null>>(query);
+    } catch {
+      continue;
+    }
+
+    for (let j = 0; j < batch.length; j++) {
+      const person = batchData[`p${j}`];
+      if (!person) continue;
+      const wcaId = person.wca_id ?? batch[j].wca_id;
+      if (!wcaId) continue;
+
+      const perEvent = reducePersonResults(person.results ?? []);
+      for (const entry of perEvent) {
+        // Single PR check
+        if (entry.best > 0) {
+          const key = `${wcaId}:${entry.eventId}`;
+          const dbBest = ranks.single.get(key);
+          if (!dbBest || entry.best <= dbBest) {
+            addLivePR(personMap, wcaId, person.name, {
+              eventId: entry.eventId,
+              competitionId: wcaCompId,
+              competitionName: compName,
+              cityName: "",
+              endDate,
+              type: "single",
+              time: entry.best,
+              wr: null,
+              cr: null,
+              nr: null,
+              regionalRecord: entry.singleRecord,
+              isLive: true,
+            });
+          }
+        }
+
+        // Average PR check
+        if (entry.average > 0) {
+          const key = `${wcaId}:${entry.eventId}`;
+          const dbAvgBest = ranks.average.get(key);
+          if (!dbAvgBest || entry.average <= dbAvgBest) {
+            addLivePR(personMap, wcaId, person.name, {
+              eventId: entry.eventId,
+              competitionId: wcaCompId,
+              competitionName: compName,
+              cityName: "",
+              endDate,
+              type: "average",
+              time: entry.average,
+              wr: null,
+              cr: null,
+              nr: null,
+              regionalRecord: entry.averageRecord,
+              isLive: true,
+            });
+          }
+        }
+      }
+    }
+  }
 }
