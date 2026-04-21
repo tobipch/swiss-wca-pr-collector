@@ -41,7 +41,6 @@ interface GqlCompetition {
   name: string;
   start_date: string;
   end_date: string | null;
-  synchronized_at: string | null;
 }
 
 interface GqlResult {
@@ -66,7 +65,11 @@ interface GqlEvent {
   rounds: GqlRound[];
 }
 
-interface GqlCompetitionDetail extends GqlCompetition {
+interface GqlCompetitionDetail {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string | null;
   competition_events: { event: { id: string }; rounds: GqlRound[] }[];
 }
 
@@ -79,7 +82,6 @@ const COMPETITIONS_QUERY = `
       name
       start_date
       end_date
-      synchronized_at
     }
   }
 `;
@@ -91,7 +93,6 @@ const COMPETITION_RESULTS_QUERY = `
       name
       start_date
       end_date
-      synchronized_at
       competition_events {
         event { id }
         rounds {
@@ -153,9 +154,9 @@ export async function fetchLivePRs(
     return [];
   }
 
-  // Only unsynchronised competitions not already in our DB
+  // Only competitions not yet in our local DB (those are already served from the cache)
   const liveComps = competitions.filter(
-    (c) => !c.synchronized_at && !knownCompetitionIds.has(c.id)
+    (c) => !knownCompetitionIds.has(c.id)
   );
 
   if (liveComps.length === 0) return [];

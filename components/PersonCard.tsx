@@ -20,11 +20,19 @@ export default function PersonCard({ person, initialOpen = true }: Props) {
     byEvent.get(pr.eventId)!.push(pr);
   }
 
-  const eventGroups = Array.from(byEvent.entries()).sort(
-    ([a], [b]) =>
-      (EVENT_ORDER.indexOf(a) === -1 ? 99 : EVENT_ORDER.indexOf(a)) -
-      (EVENT_ORDER.indexOf(b) === -1 ? 99 : EVENT_ORDER.indexOf(b))
-  );
+  const eventGroups = Array.from(byEvent.entries()).sort(([aId, aPrs], [bId, bPrs]) => {
+    const minRank = (prs: PR[], key: "nr" | "cr" | "wr") =>
+      Math.min(...prs.map((p) => p[key] ?? Infinity));
+    const diff =
+      minRank(aPrs, "nr") - minRank(bPrs, "nr") ||
+      minRank(aPrs, "cr") - minRank(bPrs, "cr") ||
+      minRank(aPrs, "wr") - minRank(bPrs, "wr");
+    if (diff !== 0) return diff;
+    return (
+      (EVENT_ORDER.indexOf(aId) === -1 ? 99 : EVENT_ORDER.indexOf(aId)) -
+      (EVENT_ORDER.indexOf(bId) === -1 ? 99 : EVENT_ORDER.indexOf(bId))
+    );
+  });
 
   const hasLive = person.prs.some((pr) => pr.isLive);
 
@@ -118,7 +126,7 @@ function PRBadge({ pr, personId }: { pr: PR; personId: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className={`group flex flex-col gap-1 border rounded-lg px-3 py-2 transition-colors min-w-[8rem] flex-1 max-w-[12rem] ${colors}`}
+      className={`group flex flex-col gap-1 border rounded-lg px-3 py-2 transition-colors min-w-[9rem] flex-1 max-w-[14rem] ${colors}`}
     >
       {/* Event header */}
       <div className="flex items-center gap-1.5">

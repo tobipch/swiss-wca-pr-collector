@@ -34,7 +34,7 @@ export default async function Home({ searchParams }: Props) {
   const totalPRs = persons?.reduce((sum, p) => sum + p.prs.length, 0) ?? 0;
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
+    <div className="max-w-5xl mx-auto px-4 py-8">
       <header className="mb-8">
         <div className="flex items-center gap-3 mb-1">
           <span className="text-3xl">🇨🇭</span>
