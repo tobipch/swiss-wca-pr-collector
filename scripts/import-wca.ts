@@ -401,7 +401,7 @@ async function importRankBrackets(
 
 // ─── Cache builder ────────────────────────────────────────────────────────────
 
-const CACHE_DAYS = [7, 14, 30, 60, 90];
+const CACHE_DAYS = [3, 7, 14, 30, 60, 90];
 
 async function buildPRCache(): Promise<void> {
   console.log("Building PR cache...");

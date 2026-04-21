@@ -47,12 +47,15 @@ export interface PR {
   prevTime?: number; // previous best for this (event, type) before this competition
 }
 
-// Read pre-computed results from pr_cache — populated by the import script
+// Read pre-computed results from pr_cache — populated by the import script.
+// Falls back to a live SQL query if the cache doesn't have an entry for `days`
+// (e.g. a new day value added before the next import has run).
 export async function fetchPRs(days: number): Promise<PersonPRs[]> {
   const rows = await sql<{ result: PersonPRs[] }[]>`
     SELECT result FROM pr_cache WHERE days = ${days}
   `;
-  return rows[0]?.result ?? [];
+  if (rows[0]?.result) return rows[0].result;
+  return fetchPRsImpl(days);
 }
 
 // Full SQL query used by the import script to build the cache
