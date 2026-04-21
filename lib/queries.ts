@@ -128,8 +128,14 @@ export async function getAllSwissRanks(): Promise<RankMap> {
 }
 
 export async function getDbCompetitionIds(): Promise<Set<string>> {
-  const rows = await sql<{ id: string }[]>`SELECT id FROM competitions`;
-  return new Set(rows.map((r) => r.id));
+  // Only competitions with actual results are considered "in the DB".
+  // A competition row may exist before results are imported, so filtering
+  // by the results table prevents us from skipping live data for competitions
+  // that are registered but not yet fully exported.
+  const rows = await sql<{ competition_id: string }[]>`
+    SELECT DISTINCT competition_id FROM results
+  `;
+  return new Set(rows.map((r) => r.competition_id));
 }
 
 function nullStr(val: string | null): string | null {
