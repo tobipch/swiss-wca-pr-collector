@@ -37,7 +37,8 @@ async function graphql<T>(
 // ─── GraphQL types ─────────────────────────────────────────────────────────
 
 interface GqlCompetition {
-  id: string;
+  id: string;      // WCA Live internal numeric ID — used for API queries
+  wca_id: string;  // WCA string ID (e.g. "GhemAmmoVoiaDaCubaa2026") — used for DB deduplication
   name: string;
   start_date: string;
   end_date: string | null;
@@ -67,6 +68,7 @@ interface GqlEvent {
 
 interface GqlCompetitionDetail {
   id: string;
+  wca_id: string;
   name: string;
   start_date: string;
   end_date: string | null;
@@ -79,6 +81,7 @@ const COMPETITIONS_QUERY = `
   query RecentCompetitions($from: Date) {
     competitions(from: $from) {
       id
+      wca_id
       name
       start_date
       end_date
@@ -90,6 +93,7 @@ const COMPETITION_RESULTS_QUERY = `
   query CompetitionResults($id: ID!) {
     competition(id: $id) {
       id
+      wca_id
       name
       start_date
       end_date
@@ -154,9 +158,10 @@ export async function fetchLivePRs(
     return [];
   }
 
-  // Only competitions not yet in our local DB (those are already served from the cache)
+  // Use wca_id (string ID like "GhemAmmoVoiaDaCubaa2026") to match against our DB,
+  // since WCA Live's internal id is a numeric key that differs from the WCA string ID.
   const liveComps = competitions.filter(
-    (c) => !knownCompetitionIds.has(c.id)
+    (c) => c.wca_id && !knownCompetitionIds.has(c.wca_id)
   );
 
   if (liveComps.length === 0) return [];
@@ -187,6 +192,8 @@ export async function fetchLivePRs(
           const { wca_id: wcaId, name, country } = result.person;
           if (!wcaId || country?.iso2 !== "CH") continue;
 
+          const wcaCompId = detail.wca_id; // WCA string ID for links + dedup
+
           // Single PR check
           if (result.best > 0) {
             const key = `${wcaId}:${eventId}`;
@@ -194,10 +201,10 @@ export async function fetchLivePRs(
             if (!dbBest || result.best <= dbBest) {
               addLivePR(personMap, wcaId, name, {
                 eventId,
-                competitionId: comp.id,
-                competitionName: comp.name,
+                competitionId: wcaCompId,
+                competitionName: detail.name,
                 cityName: "",
-                endDate: comp.end_date ?? comp.start_date,
+                endDate: detail.end_date ?? detail.start_date,
                 type: "single",
                 time: result.best,
                 wr: null,
@@ -216,10 +223,10 @@ export async function fetchLivePRs(
             if (!dbAvgBest || result.average <= dbAvgBest) {
               addLivePR(personMap, wcaId, name, {
                 eventId,
-                competitionId: comp.id,
-                competitionName: comp.name,
+                competitionId: wcaCompId,
+                competitionName: detail.name,
                 cityName: "",
-                endDate: comp.end_date ?? comp.start_date,
+                endDate: detail.end_date ?? detail.start_date,
                 type: "average",
                 time: result.average,
                 wr: null,
