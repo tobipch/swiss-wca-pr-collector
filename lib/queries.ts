@@ -1,4 +1,3 @@
-import { unstable_cache } from "next/cache";
 import { sql } from "./db";
 
 export interface PRRow {
@@ -43,7 +42,16 @@ export interface PR {
   regionalRecord: string | null;
 }
 
-async function fetchPRsImpl(days: number): Promise<PersonPRs[]> {
+// Read pre-computed results from pr_cache — populated by the import script
+export async function fetchPRs(days: number): Promise<PersonPRs[]> {
+  const rows = await sql<{ result: PersonPRs[] }[]>`
+    SELECT result FROM pr_cache WHERE days = ${days}
+  `;
+  return rows[0]?.result ?? [];
+}
+
+// Full SQL query used by the import script to build the cache
+export async function fetchPRsImpl(days: number): Promise<PersonPRs[]> {
   const rows = await sql<PRRow[]>`
     SELECT
       r.person_id,
@@ -85,13 +93,6 @@ async function fetchPRsImpl(days: number): Promise<PersonPRs[]> {
 
   return groupByPerson(rows);
 }
-
-// Cache for 1 hour — data only changes after weekly import
-export const fetchPRs = unstable_cache(
-  fetchPRsImpl,
-  ["wca-prs"],
-  { revalidate: 3600 }
-);
 
 export async function getImportDate(): Promise<string | null> {
   try {
@@ -155,7 +156,6 @@ function groupByPerson(rows: PRRow[]): PersonPRs[] {
     }
   }
 
-  // Remove persons with no PRs (shouldn't happen, but safety net)
   return [...map.values()]
     .filter((p) => p.prs.length > 0)
     .sort((a, b) => {

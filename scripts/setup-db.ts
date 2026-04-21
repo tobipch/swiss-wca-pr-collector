@@ -97,6 +97,19 @@ async function main() {
     )
   `;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS pr_cache (
+      days        INTEGER PRIMARY KEY,
+      result      JSONB NOT NULL,
+      computed_at TIMESTAMP DEFAULT NOW()
+    )
+  `;
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_competitions_end_date
+      ON competitions (end_date)
+  `;
+
   console.log("All tables created successfully.");
   await sql.end();
 }
