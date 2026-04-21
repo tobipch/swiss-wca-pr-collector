@@ -144,7 +144,7 @@ function PRBadge({ pr, personId, prevTime }: { pr: PR; personId: string; prevTim
   const typeColor = isSingle ? "text-blue-500" : "text-orange-500";
 
   const record = pr.regionalRecord && pr.regionalRecord !== "PR" ? pr.regionalRecord : null;
-  const glow = record ? "shadow-[0_0_12px_4px_rgba(250,204,21,0.5)]" : "";
+  const glow = record ? "shadow-[0_0_12px_4px_rgba(34,197,94,0.5)]" : "";
 
   return (
     <a
