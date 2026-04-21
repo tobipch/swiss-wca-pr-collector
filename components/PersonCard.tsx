@@ -1,53 +1,99 @@
+"use client";
+
+import { useState } from "react";
 import type { PersonPRs, PR } from "@/lib/queries";
 import { eventName, eventIconUrl, EVENT_ORDER, typeLabel } from "@/lib/events";
 import { formatTime } from "@/lib/format";
 
 interface Props {
   person: PersonPRs;
+  initialOpen?: boolean;
 }
 
-export default function PersonCard({ person }: Props) {
-  // Group PRs by event, preserving EVENT_ORDER
-  const byEvent = new Map<string, { single?: PR; average?: PR }>();
+export default function PersonCard({ person, initialOpen = true }: Props) {
+  const [open, setOpen] = useState(initialOpen);
+
+  // Group PRs by event (multiple PRs per event are allowed, e.g. DB + live)
+  const byEvent = new Map<string, PR[]>();
   for (const pr of person.prs) {
-    if (!byEvent.has(pr.eventId)) byEvent.set(pr.eventId, {});
-    const entry = byEvent.get(pr.eventId)!;
-    if (pr.type === "single") entry.single = pr;
-    else entry.average = pr;
+    if (!byEvent.has(pr.eventId)) byEvent.set(pr.eventId, []);
+    byEvent.get(pr.eventId)!.push(pr);
   }
 
-  const eventGroups = [...byEvent.entries()].sort(
+  const eventGroups = Array.from(byEvent.entries()).sort(
     ([a], [b]) =>
       (EVENT_ORDER.indexOf(a) === -1 ? 99 : EVENT_ORDER.indexOf(a)) -
       (EVENT_ORDER.indexOf(b) === -1 ? 99 : EVENT_ORDER.indexOf(b))
   );
 
+  const hasLive = person.prs.some((pr) => pr.isLive);
+
   return (
     <div
       id={person.personId}
-      className="bg-white rounded-xl border border-gray-200 p-5 scroll-mt-4"
+      className="bg-white rounded-xl border border-gray-200 scroll-mt-4 overflow-hidden"
     >
-      <div className="flex items-center justify-between mb-4">
-        <a
-          href={`https://www.worldcubeassociation.org/persons/${person.personId}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-semibold text-gray-900 hover:text-blue-600 transition-colors"
-        >
-          {person.personName}
-        </a>
-        <span className="text-xs text-gray-400 font-mono">{person.personId}</span>
+      {/* Accordion header */}
+      <div
+        className="flex items-center justify-between px-5 py-4 cursor-pointer select-none hover:bg-gray-50 transition-colors"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <a
+            href={`https://www.worldcubeassociation.org/persons/${person.personId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-gray-900 hover:text-blue-600 transition-colors truncate"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {person.personName}
+          </a>
+          <span className="text-xs text-gray-400 font-mono shrink-0">
+            {person.personId}
+          </span>
+          {hasLive && (
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5 shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
+              Live
+            </span>
+          )}
+        </div>
+        <ChevronIcon open={open} />
       </div>
 
-      <div className="flex flex-col gap-2">
-        {eventGroups.map(([eventId, { single, average }]) => (
-          <div key={eventId} className="flex gap-2">
-            {single && <PRBadge pr={single} personId={person.personId} />}
-            {average && <PRBadge pr={average} personId={person.personId} />}
+      {/* Collapsible body */}
+      {open && (
+        <div className="px-5 pb-5 border-t border-gray-100">
+          <div className="flex flex-col gap-2 pt-3">
+            {eventGroups.map(([eventId, prs]) => (
+              <div key={eventId} className="flex gap-2 flex-wrap">
+                {prs.map((pr: PR, i: number) => (
+                  <PRBadge
+                    key={`${pr.type}-${pr.competitionId}-${i}`}
+                    pr={pr}
+                    personId={person.personId}
+                  />
+                ))}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`w-5 h-5 text-gray-400 transition-transform shrink-0 ml-2 ${open ? "" : "-rotate-90"}`}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={2}
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+    </svg>
   );
 }
 
@@ -55,11 +101,17 @@ function PRBadge({ pr, personId }: { pr: PR; personId: string }) {
   const href = `https://www.worldcubeassociation.org/persons/${personId}?event=${pr.eventId}`;
   const isSingle = pr.type === "single";
 
-  const colors = isSingle
+  const colors = pr.isLive
+    ? "bg-red-50 hover:bg-red-100 border-red-200 hover:border-red-300"
+    : isSingle
     ? "bg-blue-50 hover:bg-blue-100 border-blue-200 hover:border-blue-300"
     : "bg-orange-50 hover:bg-orange-100 border-orange-200 hover:border-orange-300";
 
-  const typeColor = isSingle ? "text-blue-500" : "text-orange-500";
+  const typeColor = pr.isLive
+    ? "text-red-500"
+    : isSingle
+    ? "text-blue-500"
+    : "text-orange-500";
 
   return (
     <a
@@ -91,8 +143,14 @@ function PRBadge({ pr, personId }: { pr: PR; personId: string }) {
         {formatTime(pr.time, pr.eventId, pr.type)}
       </span>
 
-      {/* Rankings */}
+      {/* Rankings / badges */}
       <div className="flex gap-1 flex-wrap">
+        {pr.isLive && (
+          <span className="inline-flex items-center gap-0.5 text-xs font-bold text-red-600">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
+            LIVE
+          </span>
+        )}
         {pr.regionalRecord && (
           <RecordHighlight record={pr.regionalRecord} />
         )}

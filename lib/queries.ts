@@ -40,6 +40,7 @@ export interface PR {
   cr: number | null;
   nr: number | null;
   regionalRecord: string | null;
+  isLive?: boolean;
 }
 
 // Read pre-computed results from pr_cache — populated by the import script
@@ -103,6 +104,32 @@ export async function getImportDate(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+export interface RankMap {
+  single: Map<string, number>;   // "personId:eventId" → best
+  average: Map<string, number>;
+}
+
+export async function getAllSwissRanks(): Promise<RankMap> {
+  const [singles, averages] = await Promise.all([
+    sql<{ person_id: string; event_id: string; best: number }[]>`
+      SELECT person_id, event_id, best FROM ranks_single
+    `,
+    sql<{ person_id: string; event_id: string; best: number }[]>`
+      SELECT person_id, event_id, best FROM ranks_average
+    `,
+  ]);
+  const single = new Map<string, number>();
+  const average = new Map<string, number>();
+  for (const r of singles) single.set(`${r.person_id}:${r.event_id}`, r.best);
+  for (const r of averages) average.set(`${r.person_id}:${r.event_id}`, r.best);
+  return { single, average };
+}
+
+export async function getDbCompetitionIds(): Promise<Set<string>> {
+  const rows = await sql<{ id: string }[]>`SELECT id FROM competitions`;
+  return new Set(rows.map((r) => r.id));
 }
 
 function nullStr(val: string | null): string | null {

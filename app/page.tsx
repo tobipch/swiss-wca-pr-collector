@@ -1,5 +1,7 @@
 import { Suspense } from "react";
-import { fetchPRs, getImportDate } from "@/lib/queries";
+import { fetchPRs, getImportDate, getAllSwissRanks, getDbCompetitionIds } from "@/lib/queries";
+import { fetchLivePRs } from "@/lib/wca-live";
+import type { PersonPRs } from "@/lib/queries";
 import PRList from "@/components/PRList";
 import DaysSelector from "@/components/DaysSelector";
 
@@ -16,10 +18,18 @@ export default async function Home({ searchParams }: Props) {
     ? Number(params.days)
     : DEFAULT_DAYS;
 
-  const [persons, importDate] = await Promise.all([
+  const [dbPersons, importDate, ranks, dbCompIds] = await Promise.all([
     fetchPRs(days).catch(() => null),
     getImportDate(),
+    getAllSwissRanks().catch(() => ({ single: new Map(), average: new Map() })),
+    getDbCompetitionIds().catch(() => new Set<string>()),
   ]);
+
+  // Merge live PRs (competitions not yet in WCA DB) into the result set
+  const livePRs = await fetchLivePRs(days, dbCompIds, ranks).catch(() => []);
+
+  const persons = mergeLive(dbPersons, livePRs);
+  const hasLive = livePRs.some((p) => p.prs.length > 0);
 
   const totalPRs = persons?.reduce((sum, p) => sum + p.prs.length, 0) ?? 0;
 
@@ -43,11 +53,19 @@ export default async function Home({ searchParams }: Props) {
       <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-6">
         <DaysSelector current={days} options={VALID_DAYS} />
         {persons && (
-          <p className="text-sm text-gray-500">
-            <span className="font-semibold text-gray-800">{totalPRs}</span> PRs von{" "}
-            <span className="font-semibold text-gray-800">{persons.length}</span> Cubern
-            in den letzten <span className="font-semibold text-gray-800">{days}</span> Tagen
-          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm text-gray-500">
+              <span className="font-semibold text-gray-800">{totalPRs}</span> PRs von{" "}
+              <span className="font-semibold text-gray-800">{persons.length}</span> Cubern
+              in den letzten <span className="font-semibold text-gray-800">{days}</span> Tagen
+            </p>
+            {hasLive && (
+              <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
+                Live-Daten
+              </span>
+            )}
+          </div>
         )}
       </div>
 
@@ -62,6 +80,28 @@ export default async function Home({ searchParams }: Props) {
       </Suspense>
     </div>
   );
+}
+
+function mergeLive(
+  db: PersonPRs[] | null,
+  live: PersonPRs[]
+): PersonPRs[] | null {
+  if (db === null) return null;
+  if (live.length === 0) return db;
+
+  const result = db.map((p) => ({ ...p, prs: [...p.prs] }));
+  const byId = new Map(result.map((p) => [p.personId, p]));
+
+  for (const lp of live) {
+    const existing = byId.get(lp.personId);
+    if (existing) {
+      existing.prs.push(...lp.prs);
+    } else {
+      result.push({ ...lp });
+    }
+  }
+
+  return result;
 }
 
 function LoadingState() {
