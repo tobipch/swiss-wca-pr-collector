@@ -52,7 +52,7 @@ export default function DaysSelector({ current, options }: Props) {
                 : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
             }`}
           >
-            {d}d
+            {d} Tage
           </button>
         ))}
       </div>

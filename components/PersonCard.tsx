@@ -200,12 +200,12 @@ function PRBadge({ pr, personId, prevTime }: { pr: PR; personId: string; prevTim
 
 function RecordHighlight({ record }: { record: string }) {
   const styles: Record<string, string> = {
-    WR: "bg-yellow-400 text-yellow-900 ring-1 ring-yellow-500",
-    CR: "bg-blue-500 text-white ring-1 ring-blue-600",
-    NR: "bg-green-500 text-white ring-1 ring-green-600",
+    WR: "bg-yellow-400 text-yellow-900 ring-1 ring-yellow-500 shadow-md shadow-yellow-400/70",
+    CR: "bg-blue-500 text-white ring-1 ring-blue-600 shadow-md shadow-blue-500/70",
+    NR: "bg-green-500 text-white ring-1 ring-green-600 shadow-md shadow-green-500/70",
   };
   const style =
-    styles[record] ?? "bg-amber-100 text-amber-800 ring-1 ring-amber-300";
+    styles[record] ?? "bg-amber-100 text-amber-800 ring-1 ring-amber-300 shadow-md shadow-amber-400/60";
 
   return (
     <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${style}`}>
