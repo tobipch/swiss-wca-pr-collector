@@ -278,6 +278,8 @@ async function processCompetition(
       const wcaId = person.wca_id ?? batch[j].wca_id;
       if (!wcaId) continue;
 
+      const liveUrl = `https://live.worldcubeassociation.org/competitions/${comp.id}/competitors/${batch[j].id}`;
+
       const perEvent = reducePersonResults(person.results ?? []);
       for (const entry of perEvent) {
         // Single PR check
@@ -298,6 +300,7 @@ async function processCompetition(
               nr: null,
               regionalRecord: entry.singleRecord,
               isLive: true,
+              liveUrl,
             });
           }
         }
@@ -320,6 +323,7 @@ async function processCompetition(
               nr: null,
               regionalRecord: entry.averageRecord,
               isLive: true,
+              liveUrl,
             });
           }
         }

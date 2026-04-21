@@ -35,8 +35,6 @@ export default function PersonCard({ person, initialOpen = true, highlightEvent 
     );
   });
 
-  const hasLive = person.prs.some((pr) => pr.isLive);
-
   return (
     <div
       id={person.personId}
@@ -60,12 +58,6 @@ export default function PersonCard({ person, initialOpen = true, highlightEvent 
           <span className="text-xs text-gray-400 font-mono shrink-0">
             {person.personId}
           </span>
-          {hasLive && (
-            <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5 shrink-0">
-              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
-              Live
-            </span>
-          )}
         </div>
         <ChevronIcon open={open} />
       </div>
@@ -113,20 +105,16 @@ function ChevronIcon({ open }: { open: boolean }) {
 }
 
 function PRBadge({ pr, personId }: { pr: PR; personId: string }) {
-  const href = `https://www.worldcubeassociation.org/persons/${personId}?event=${pr.eventId}`;
+  const href = pr.liveUrl
+    ? pr.liveUrl
+    : `https://www.worldcubeassociation.org/persons/${personId}?event=${pr.eventId}`;
   const isSingle = pr.type === "single";
 
-  const colors = pr.isLive
-    ? "bg-red-50 hover:bg-red-100 border-red-200 hover:border-red-300"
-    : isSingle
+  const colors = isSingle
     ? "bg-blue-50 hover:bg-blue-100 border-blue-200 hover:border-blue-300"
     : "bg-orange-50 hover:bg-orange-100 border-orange-200 hover:border-orange-300";
 
-  const typeColor = pr.isLive
-    ? "text-red-500"
-    : isSingle
-    ? "text-blue-500"
-    : "text-orange-500";
+  const typeColor = isSingle ? "text-blue-500" : "text-orange-500";
 
   return (
     <a
@@ -160,12 +148,6 @@ function PRBadge({ pr, personId }: { pr: PR; personId: string }) {
 
       {/* Rankings / badges */}
       <div className="flex gap-1 flex-wrap">
-        {pr.isLive && (
-          <span className="inline-flex items-center gap-0.5 text-xs font-bold text-red-600">
-            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
-            LIVE
-          </span>
-        )}
         {pr.regionalRecord && (
           <RecordHighlight record={pr.regionalRecord} />
         )}

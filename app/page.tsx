@@ -29,7 +29,6 @@ export default async function Home({ searchParams }: Props) {
   const livePRs = await fetchLivePRs(days, dbCompIds, ranks).catch(() => []);
 
   const persons = mergeLive(dbPersons, livePRs);
-  const hasLive = livePRs.some((p) => p.prs.length > 0);
 
   const totalPRs = persons?.reduce((sum, p) => sum + p.prs.length, 0) ?? 0;
 
@@ -53,19 +52,11 @@ export default async function Home({ searchParams }: Props) {
       <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-6">
         <DaysSelector current={days} options={VALID_DAYS} />
         {persons && (
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm text-gray-500">
-              <span className="font-semibold text-gray-800">{totalPRs}</span> PRs von{" "}
-              <span className="font-semibold text-gray-800">{persons.length}</span> Cubern
-              in den letzten <span className="font-semibold text-gray-800">{days}</span> Tagen
-            </p>
-            {hasLive && (
-              <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
-                Live-Daten
-              </span>
-            )}
-          </div>
+          <p className="text-sm text-gray-500">
+            <span className="font-semibold text-gray-800">{totalPRs}</span> PRs von{" "}
+            <span className="font-semibold text-gray-800">{persons.length}</span> Cubern
+            in den letzten <span className="font-semibold text-gray-800">{days}</span> Tagen
+          </p>
         )}
       </div>
 

@@ -41,6 +41,7 @@ export interface PR {
   nr: number | null;
   regionalRecord: string | null;
   isLive?: boolean;
+  liveUrl?: string;  // WCA Live competitor page, e.g. /competitions/10400/competitors/905132
 }
 
 // Read pre-computed results from pr_cache — populated by the import script
