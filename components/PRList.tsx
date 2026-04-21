@@ -40,7 +40,7 @@ export default function PRList({ persons }: Props) {
             id="event-filter"
             value={selectedEvent}
             onChange={(e) => setSelectedEvent(e.target.value)}
-            className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
+            className="font-sans text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
           >
             <option value="all">Alle Events</option>
             {eventIds.map((id) => (
@@ -59,7 +59,11 @@ export default function PRList({ persons }: Props) {
       <JumpNav persons={filtered} />
       <div className="space-y-4">
         {filtered.map((person) => (
-          <PersonCard key={person.personId} person={person} />
+          <PersonCard
+            key={person.personId}
+            person={person}
+            highlightEvent={selectedEvent === "all" ? undefined : selectedEvent}
+          />
         ))}
       </div>
     </div>

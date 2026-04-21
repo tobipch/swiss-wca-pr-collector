@@ -8,9 +8,10 @@ import { formatTime } from "@/lib/format";
 interface Props {
   person: PersonPRs;
   initialOpen?: boolean;
+  highlightEvent?: string;
 }
 
-export default function PersonCard({ person, initialOpen = true }: Props) {
+export default function PersonCard({ person, initialOpen = true, highlightEvent }: Props) {
   const [open, setOpen] = useState(initialOpen);
 
   // Group PRs by event (multiple PRs per event are allowed, e.g. DB + live)
@@ -73,17 +74,23 @@ export default function PersonCard({ person, initialOpen = true }: Props) {
       {open && (
         <div className="px-5 pb-5 border-t border-gray-100">
           <div className="flex flex-col gap-2 pt-3">
-            {eventGroups.map(([eventId, prs]) => (
-              <div key={eventId} className="flex gap-2 flex-wrap">
-                {prs.map((pr: PR, i: number) => (
-                  <PRBadge
-                    key={`${pr.type}-${pr.competitionId}-${i}`}
-                    pr={pr}
-                    personId={person.personId}
-                  />
-                ))}
-              </div>
-            ))}
+            {eventGroups.map(([eventId, prs]) => {
+              const dimmed = highlightEvent != null && eventId !== highlightEvent;
+              return (
+                <div
+                  key={eventId}
+                  className={`flex gap-2 flex-wrap transition-opacity duration-200 ${dimmed ? "opacity-30" : ""}`}
+                >
+                  {prs.map((pr: PR, i: number) => (
+                    <PRBadge
+                      key={`${pr.type}-${pr.competitionId}-${i}`}
+                      pr={pr}
+                      personId={person.personId}
+                    />
+                  ))}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
