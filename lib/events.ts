@@ -18,6 +18,9 @@ export const EVENT_NAMES: Record<string, string> = {
   "333mbf": "3x3x3 Multi-Blind",
 };
 
+// Events where the "average" result is a Mean of 3, not an Ao5
+export const MEAN_EVENTS = new Set(["666", "777", "333fm"]);
+
 export const EVENT_ORDER = [
   "333", "222", "444", "555", "666", "777",
   "333bf", "333fm", "333oh", "clock", "minx",
@@ -29,13 +32,18 @@ export function eventName(id: string): string {
 }
 
 export function eventIconUrl(id: string): string {
-  return `https://icons.cubing.net/dist/svg/${id}.svg`;
+  return `https://cdn.jsdelivr.net/gh/cubing/icons@main/src/svg/event/${id}.svg`;
+}
+
+export function typeLabel(eventId: string, type: "single" | "average"): string {
+  if (type === "single") return "Single";
+  return MEAN_EVENTS.has(eventId) ? "Mean" : "Avg";
 }
 
 export function sortedByEvent<T extends { event_id: string }>(items: T[]): T[] {
   return [...items].sort(
     (a, b) =>
-      (EVENT_ORDER.indexOf(a.event_id) ?? 99) -
-      (EVENT_ORDER.indexOf(b.event_id) ?? 99)
+      (EVENT_ORDER.indexOf(a.event_id) === -1 ? 99 : EVENT_ORDER.indexOf(a.event_id)) -
+      (EVENT_ORDER.indexOf(b.event_id) === -1 ? 99 : EVENT_ORDER.indexOf(b.event_id))
   );
 }

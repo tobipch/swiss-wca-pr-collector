@@ -14,6 +14,8 @@
 
 import "dotenv/config";
 import { createWriteStream, createReadStream } from "node:fs";
+// Import the query logic so we can pre-compute and cache the results
+import { fetchPRsImpl } from "../lib/queries.js";
 import { mkdir, unlink, rm, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -263,6 +265,27 @@ async function importRanks(
   console.log(`  Imported ${rows.length} ${table} entries`);
 }
 
+// ─── Cache builder ────────────────────────────────────────────────────────────
+
+const CACHE_DAYS = [7, 14, 30, 60, 90];
+
+async function buildPRCache(): Promise<void> {
+  console.log("Building PR cache...");
+  for (const days of CACHE_DAYS) {
+    const persons = await fetchPRsImpl(days);
+    // Round-trip through JSON to get a plain object tree that satisfies sql.json()
+    const personsJson = JSON.parse(JSON.stringify(persons));
+    await sql`
+      INSERT INTO pr_cache (days, result, computed_at)
+      VALUES (${days}, ${sql.json(personsJson)}, NOW())
+      ON CONFLICT (days) DO UPDATE SET
+        result      = EXCLUDED.result,
+        computed_at = EXCLUDED.computed_at
+    `;
+    console.log(`  ${days}d → ${persons.length} persons`);
+  }
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -297,6 +320,8 @@ async function main() {
     await importResults(findTsv("Results"));
     await importRanks(findTsv("ranks_single"), "ranks_single", swissIds);
     await importRanks(findTsv("ranks_average"), "ranks_average", swissIds);
+
+    await buildPRCache();
 
     await sql`
       INSERT INTO import_metadata (key, value, updated_at)
