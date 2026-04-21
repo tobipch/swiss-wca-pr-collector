@@ -5,7 +5,7 @@ import type { PersonPRs } from "@/lib/queries";
 import PRList from "@/components/PRList";
 import DaysSelector from "@/components/DaysSelector";
 
-const VALID_DAYS = [7, 14, 30, 60, 90];
+const VALID_DAYS = [7, 14, 30];
 const DEFAULT_DAYS = 30;
 
 interface Props {
