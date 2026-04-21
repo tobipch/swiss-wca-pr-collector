@@ -46,7 +46,7 @@ export default async function Home({ searchParams }: Props) {
         </p>
         {importDate && (
           <p className="text-gray-400 text-xs mt-1">
-            Datenbankstand: {new Date(importDate).toLocaleDateString("de-CH")}
+            Datenbankstand: {formatDate(new Date(importDate))}
           </p>
         )}
         <Suspense
@@ -72,18 +72,23 @@ export default async function Home({ searchParams }: Props) {
   );
 }
 
+function pad(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function formatDate(d: Date) {
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
+}
+
+function formatDateTime(d: Date) {
+  return `${formatDate(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 async function LiveTimestamp({ days, dbCompIds, ranks }: LiveProps) {
   await getLivePRs(days, dbCompIds, ranks).catch(() => []);
-  const time = new Date().toLocaleString("de-CH", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
   return (
     <p className="text-gray-400 text-xs mt-0.5">
-      WCA-Live Stand: {time}
+      WCA-Live Stand: {formatDateTime(new Date())}
     </p>
   );
 }
