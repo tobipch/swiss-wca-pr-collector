@@ -92,6 +92,15 @@ function mergeLive(
     }
   }
 
+  const minRank = (p: PersonPRs, key: "nr" | "cr" | "wr") =>
+    Math.min(...p.prs.map((pr) => pr[key] ?? Infinity));
+  result.sort(
+    (a, b) =>
+      minRank(a, "nr") - minRank(b, "nr") ||
+      minRank(a, "cr") - minRank(b, "cr") ||
+      minRank(a, "wr") - minRank(b, "wr")
+  );
+
   return result;
 }
 
