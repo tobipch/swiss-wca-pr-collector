@@ -273,9 +273,11 @@ async function buildPRCache(): Promise<void> {
   console.log("Building PR cache...");
   for (const days of CACHE_DAYS) {
     const persons = await fetchPRsImpl(days);
+    // Round-trip through JSON to get a plain object tree that satisfies sql.json()
+    const personsJson = JSON.parse(JSON.stringify(persons));
     await sql`
       INSERT INTO pr_cache (days, result, computed_at)
-      VALUES (${days}, ${sql.json(persons)}, NOW())
+      VALUES (${days}, ${sql.json(personsJson)}, NOW())
       ON CONFLICT (days) DO UPDATE SET
         result      = EXCLUDED.result,
         computed_at = EXCLUDED.computed_at
