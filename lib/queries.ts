@@ -20,6 +20,8 @@ export interface PRRow {
   avg_nr: number | null;
   is_single_pr: boolean;
   is_avg_pr: boolean;
+  prev_single_best: number | null;
+  prev_avg_best: number | null;
 }
 
 export interface PersonPRs {
@@ -75,7 +77,19 @@ export async function fetchPRsImpl(days: number): Promise<PersonPRs[]> {
       ra.continent_rank AS avg_cr,
       ra.country_rank   AS avg_nr,
       (r.best > 0 AND rs.best IS NOT NULL AND r.best = rs.best)       AS is_single_pr,
-      (r.average > 0 AND ra.best IS NOT NULL AND r.average = ra.best) AS is_avg_pr
+      (r.average > 0 AND ra.best IS NOT NULL AND r.average = ra.best) AS is_avg_pr,
+      (
+        SELECT MIN(r2.best) FROM results r2
+        WHERE r2.person_id = r.person_id
+          AND r2.event_id  = r.event_id
+          AND r2.best > r.best AND r2.best > 0
+      ) AS prev_single_best,
+      (
+        SELECT MIN(r2.average) FROM results r2
+        WHERE r2.person_id = r.person_id
+          AND r2.event_id  = r.event_id
+          AND r2.average > r.average AND r2.average > 0
+      ) AS prev_avg_best
     FROM results r
     JOIN competitions c ON r.competition_id = c.id
     LEFT JOIN ranks_single rs
@@ -171,6 +185,7 @@ function groupByPerson(rows: PRRow[]): PersonPRs[] {
         cr: row.single_cr,
         nr: row.single_nr,
         regionalRecord: nullStr(row.regional_single_record),
+        prevTime: row.prev_single_best ?? undefined,
       });
     }
 
@@ -187,6 +202,7 @@ function groupByPerson(rows: PRRow[]): PersonPRs[] {
         cr: row.avg_cr,
         nr: row.avg_nr,
         regionalRecord: nullStr(row.regional_average_record),
+        prevTime: row.prev_avg_best ?? undefined,
       });
     }
   }
@@ -198,4 +214,52 @@ function groupByPerson(rows: PRRow[]): PersonPRs[] {
         Math.min(...p.prs.map((pr) => pr.nr ?? Infinity));
       return minNr(a) - minNr(b);
     });
+}
+
+// ─── Virtual rankings ─────────────────────────────────────────────────────────
+
+interface VirtualRanking { wr: number | null; cr: number | null }
+
+/**
+ * For each (eventId, type, time) triple in `prs`, returns the virtual world
+ * rank and European continental rank that result would have in the WCA DB.
+ * Uses the rank_brackets table (populated by the import script).
+ * Returns an empty map on error (e.g. table not yet created).
+ */
+export async function getVirtualRankings(
+  prs: Array<{ eventId: string; type: "single" | "average"; time: number }>
+): Promise<Map<string, VirtualRanking>> {
+  if (prs.length === 0) return new Map();
+  try {
+    const eventIds = prs.map((p) => p.eventId);
+    const types    = prs.map((p) => p.type);
+    const times    = prs.map((p) => p.time);
+
+    const rows = await sql<
+      { event_id: string; type: string; time: number; virtual_wr: number | null; virtual_cr: number | null }[]
+    >`
+      SELECT v.event_id, v.type, v.time::int,
+        MIN(rb.world_rank)  AS virtual_wr,
+        MIN(rb.europe_rank) AS virtual_cr
+      FROM unnest(
+        ${sql.array(eventIds)}::text[],
+        ${sql.array(types)}::text[],
+        ${sql.array(times)}::int[]
+      ) AS v(event_id, type, time)
+      LEFT JOIN rank_brackets rb
+        ON rb.event_id = v.event_id
+       AND rb.type     = v.type
+       AND rb.best    >= v.time
+      GROUP BY v.event_id, v.type, v.time
+    `;
+
+    return new Map(
+      rows.map((r) => [
+        `${r.event_id}:${r.type}:${r.time}`,
+        { wr: r.virtual_wr, cr: r.virtual_cr },
+      ])
+    );
+  } catch {
+    return new Map();
+  }
 }

@@ -173,6 +173,13 @@ function PRBadge({ pr, personId, prevTime }: { pr: PR; personId: string; prevTim
         {formatTime(pr.time, pr.eventId, pr.type)}
       </span>
 
+      {/* Previous PR — directly below the time */}
+      {prevTime != null && prevTime > 0 && (
+        <span className="text-xs text-gray-400 -mt-0.5">
+          vorher <span className="font-mono">{formatTime(prevTime, pr.eventId, pr.type)}</span>
+        </span>
+      )}
+
       {/* Rankings / record badges — "PR" tag is suppressed (redundant) */}
       <div className="flex gap-1 flex-wrap">
         {pr.regionalRecord && pr.regionalRecord !== "PR" && (
@@ -187,13 +194,6 @@ function PRBadge({ pr, personId, prevTime }: { pr: PR; personId: string; prevTim
       <span className="text-xs text-gray-400 group-hover:text-gray-600 truncate transition-colors">
         {pr.competitionName}
       </span>
-
-      {/* Previous PR — shown when known */}
-      {prevTime != null && prevTime > 0 && (
-        <span className="text-xs text-gray-300 font-mono">
-          vorher {formatTime(prevTime, pr.eventId, pr.type)}
-        </span>
-      )}
     </a>
   );
 }

@@ -265,6 +265,111 @@ async function importRanks(
   console.log(`  Imported ${rows.length} ${table} entries`);
 }
 
+// Only import the top N global results per event for the rank_brackets table.
+// This covers any realistic NR/CR/WR range for Swiss competitors.
+const RANK_BRACKETS_LIMIT = 10_000;
+
+async function buildPersonContinentMap(
+  personsFile: string,
+  countriesFile: string
+): Promise<Map<string, string>> {
+  // countryId → continentId
+  const continentMap = new Map<string, string>();
+  for await (const row of readTSV(countriesFile)) {
+    const id = row["id"] ?? "";
+    const continentId = col(row, "continent_id", "continentId");
+    if (id && continentId) continentMap.set(id, continentId);
+  }
+
+  // personId → continentId
+  const personContinentMap = new Map<string, string>();
+  for await (const row of readTSV(personsFile)) {
+    const personId = row["id"] ?? "";
+    const countryId = col(row, "country_id", "countryId");
+    const continentId = continentMap.get(countryId) ?? "";
+    if (personId) personContinentMap.set(personId, continentId);
+  }
+  return personContinentMap;
+}
+
+async function importRankBracketsForType(
+  filePath: string,
+  type: "single" | "average",
+  personContinentMap: Map<string, string>
+): Promise<number> {
+  interface Bracket {
+    world_rank: number;
+    europe_rank: number | null;
+  }
+  const brackets = new Map<string, Bracket>(); // key = `${eventId}:${best}`
+
+  for await (const row of readTSV(filePath)) {
+    const worldRank = Number(col(row, "world_rank", "worldRank")) || 0;
+    if (!worldRank || worldRank > RANK_BRACKETS_LIMIT) continue;
+
+    const personId = col(row, "person_id", "personId");
+    const eventId  = col(row, "event_id",  "eventId");
+    const best     = Number(row["best"]) || 0;
+    const contRank = Number(col(row, "continent_rank", "continentRank")) || 0;
+    if (!best || !eventId) continue;
+
+    const isEurope = personContinentMap.get(personId) === "_Europe";
+    const key = `${eventId}:${best}`;
+    const cur = brackets.get(key);
+    if (!cur) {
+      brackets.set(key, {
+        world_rank:  worldRank,
+        europe_rank: isEurope && contRank > 0 ? contRank : null,
+      });
+    } else {
+      if (worldRank < cur.world_rank) cur.world_rank = worldRank;
+      if (isEurope && contRank > 0) {
+        cur.europe_rank =
+          cur.europe_rank === null ? contRank : Math.min(cur.europe_rank, contRank);
+      }
+    }
+  }
+
+  const rows = Array.from(brackets.entries()).map(([key, val]) => {
+    const colon = key.indexOf(":");
+    return {
+      event_id:    key.slice(0, colon),
+      type,
+      best:        Number(key.slice(colon + 1)),
+      world_rank:  val.world_rank,
+      europe_rank: val.europe_rank,
+    };
+  });
+
+  await batchInsert(rows, async (batch) => {
+    await sql`
+      INSERT INTO rank_brackets ${sql(batch)}
+      ON CONFLICT (event_id, type, best) DO UPDATE SET
+        world_rank  = LEAST(rank_brackets.world_rank,  EXCLUDED.world_rank),
+        europe_rank = COALESCE(
+          LEAST(rank_brackets.europe_rank, EXCLUDED.europe_rank),
+          rank_brackets.europe_rank,
+          EXCLUDED.europe_rank
+        )
+    `;
+  });
+
+  return rows.length;
+}
+
+async function importRankBrackets(
+  singleFile: string,
+  avgFile: string,
+  personContinentMap: Map<string, string>
+): Promise<void> {
+  console.log("Importing rank brackets (global top-10k)...");
+  await sql`TRUNCATE rank_brackets`;
+
+  const ns = await importRankBracketsForType(singleFile, "single", personContinentMap);
+  const na = await importRankBracketsForType(avgFile,    "average", personContinentMap);
+  console.log(`  single: ${ns} brackets, average: ${na} brackets`);
+}
+
 // ─── Cache builder ────────────────────────────────────────────────────────────
 
 const CACHE_DAYS = [7, 14, 30, 60, 90];
@@ -315,11 +420,26 @@ async function main() {
       return join(extractDir, match);
     }
 
-    const swissIds = await importPersons(findTsv("Persons"));
+    const personsFile = findTsv("Persons");
+    const swissIds = await importPersons(personsFile);
     await importCompetitions(findTsv("Competitions"));
     await importResults(findTsv("Results"));
     await importRanks(findTsv("ranks_single"), "ranks_single", swissIds);
     await importRanks(findTsv("ranks_average"), "ranks_average", swissIds);
+
+    try {
+      const personContinentMap = await buildPersonContinentMap(
+        personsFile,
+        findTsv("Countries")
+      );
+      await importRankBrackets(
+        findTsv("ranks_single"),
+        findTsv("ranks_average"),
+        personContinentMap
+      );
+    } catch (e) {
+      console.warn("Skipping rank_brackets import:", e);
+    }
 
     await buildPRCache();
 

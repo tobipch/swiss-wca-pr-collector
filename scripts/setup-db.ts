@@ -106,6 +106,22 @@ async function main() {
   `;
 
   await sql`
+    CREATE INDEX IF NOT EXISTS idx_results_person_event_best
+      ON results (person_id, event_id, best)
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS rank_brackets (
+      event_id      TEXT NOT NULL,
+      type          TEXT NOT NULL,
+      best          INTEGER NOT NULL,
+      world_rank    INTEGER NOT NULL,
+      europe_rank   INTEGER,
+      PRIMARY KEY (event_id, type, best)
+    )
+  `;
+
+  await sql`
     CREATE INDEX IF NOT EXISTS idx_competitions_end_date
       ON competitions (end_date)
   `;

@@ -12,6 +12,7 @@
  * gracefully when WCA Live is unavailable.
  */
 
+import { getVirtualRankings } from "./queries";
 import type { PersonPRs, PR, RankMap } from "./queries";
 
 const WCA_LIVE_API = "https://live.worldcubeassociation.org/api";
@@ -244,6 +245,16 @@ export async function fetchLivePRs(
   await Promise.all(
     liveComps.map((comp) => processCompetition(comp, ranks, personMap))
   );
+
+  // Batch-compute virtual WR/CR from the rank_brackets DB table
+  const allPRs = Array.from(personMap.values()).flatMap((p) => p.prs);
+  const rankings = await getVirtualRankings(
+    allPRs.map((pr) => ({ eventId: pr.eventId, type: pr.type, time: pr.time }))
+  );
+  for (const pr of allPRs) {
+    const r = rankings.get(`${pr.eventId}:${pr.type}:${pr.time}`);
+    if (r) { pr.wr = r.wr; pr.cr = r.cr; }
+  }
 
   return Array.from(personMap.values()).filter((p) => p.prs.length > 0);
 }
