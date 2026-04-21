@@ -16,6 +16,9 @@ export const sql =
     max: 10,
     idle_timeout: 20,
     connect_timeout: 10,
+    max_lifetime: 60 * 10,
+    // Kill any query that runs longer than 15 seconds
+    connection: { statement_timeout: 15000 },
   });
 
 if (process.env.NODE_ENV !== "production") globalForDb.sql = sql;
