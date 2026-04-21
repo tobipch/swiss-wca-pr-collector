@@ -143,12 +143,21 @@ function PRBadge({ pr, personId, prevTime }: { pr: PR; personId: string; prevTim
 
   const typeColor = isSingle ? "text-blue-500" : "text-orange-500";
 
+  const record = pr.regionalRecord && pr.regionalRecord !== "PR" ? pr.regionalRecord : null;
+  const glow = record === "WR"
+    ? "shadow-lg shadow-yellow-400/60"
+    : record === "CR"
+    ? "shadow-lg shadow-blue-500/60"
+    : record === "NR"
+    ? "shadow-lg shadow-green-500/60"
+    : "";
+
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className={`group flex flex-col gap-1 border rounded-lg px-3 py-2 transition-colors min-w-[9rem] flex-1 max-w-[14rem] ${colors}`}
+      className={`group flex flex-col gap-1 border rounded-lg px-3 py-2 transition-colors min-w-[9rem] flex-1 max-w-[14rem] ${colors} ${glow}`}
     >
       {/* Event header */}
       <div className="flex items-center gap-1.5">
@@ -200,12 +209,12 @@ function PRBadge({ pr, personId, prevTime }: { pr: PR; personId: string; prevTim
 
 function RecordHighlight({ record }: { record: string }) {
   const styles: Record<string, string> = {
-    WR: "bg-yellow-400 text-yellow-900 ring-1 ring-yellow-500 shadow-md shadow-yellow-400/70",
-    CR: "bg-blue-500 text-white ring-1 ring-blue-600 shadow-md shadow-blue-500/70",
-    NR: "bg-green-500 text-white ring-1 ring-green-600 shadow-md shadow-green-500/70",
+    WR: "bg-yellow-400 text-yellow-900 ring-1 ring-yellow-500",
+    CR: "bg-blue-500 text-white ring-1 ring-blue-600",
+    NR: "bg-green-500 text-white ring-1 ring-green-600",
   };
   const style =
-    styles[record] ?? "bg-amber-100 text-amber-800 ring-1 ring-amber-300 shadow-md shadow-amber-400/60";
+    styles[record] ?? "bg-amber-100 text-amber-800 ring-1 ring-amber-300";
 
   return (
     <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${style}`}>
