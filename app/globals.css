@@ -3,28 +3,22 @@
 @tailwind utilities;
 
 @keyframes shimmer-blue {
-  0%   { background-position: -200% center; }
-  100% { background-position:  200% center; }
+  0%   { background-position: 0% center; }
+  100% { background-position: 200% center; }
 }
 @keyframes shimmer-orange {
-  0%   { background-position: -200% center; }
-  100% { background-position:  200% center; }
+  0%   { background-position: 0% center; }
+  100% { background-position: 200% center; }
 }
 
 .bravo-shimmer-blue {
-  background: linear-gradient(105deg,
-    #dbeafe 0%, #dbeafe 35%,
-    #bfdbfe 48%, #dbeafe 62%,
-    #dbeafe 100%);
-  background-size: 250% 100%;
-  animation: shimmer-blue 3.5s ease-in-out infinite;
+  background: linear-gradient(105deg, #dbeafe 0%, #bfdbfe 50%, #dbeafe 100%);
+  background-size: 200% 100%;
+  animation: shimmer-blue 3.5s linear infinite;
 }
 
 .bravo-shimmer-orange {
-  background: linear-gradient(105deg,
-    #ffedd5 0%, #ffedd5 35%,
-    #fed7aa 48%, #ffedd5 62%,
-    #ffedd5 100%);
-  background-size: 250% 100%;
-  animation: shimmer-orange 3.5s ease-in-out infinite;
+  background: linear-gradient(105deg, #ffedd5 0%, #fed7aa 50%, #ffedd5 100%);
+  background-size: 200% 100%;
+  animation: shimmer-orange 3.5s linear infinite;
 }
