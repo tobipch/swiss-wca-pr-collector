@@ -188,7 +188,6 @@ function badgeInlineStyle(
   const style: React.CSSProperties = {};
 
   if (hasRecord) {
-    shadows.push("0 8px 24px rgba(34,197,94,0.3)", "0 2px 8px rgba(34,197,94,0.15)");
     style.transform = "translateY(-4px)";
   }
 
@@ -243,7 +242,7 @@ function PRBadge({
       style={badgeInlineStyle(isSingle, level, !!record)}
     >
       {record && (
-        <div className="h-[3px] shrink-0" style={{ background: recordStripe(record) }} />
+        <div className="h-[5px] shrink-0" style={{ background: recordStripe(record) }} />
       )}
       <a
         href={href}
