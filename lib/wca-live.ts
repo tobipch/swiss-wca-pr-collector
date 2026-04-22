@@ -261,6 +261,154 @@ export async function fetchLivePRs(
   return Array.from(personMap.values()).filter((p) => p.prs.length > 0);
 }
 
+// ─── Custom following variant ─────────────────────────────────────────────────
+
+export async function fetchLivePRsForPersons(
+  personIds: string[],
+  days: number,
+  knownCompetitionIds: Set<string>,
+  ranks: RankMap
+): Promise<PersonPRs[]> {
+  if (personIds.length === 0) return [];
+  const followedIds = new Set(personIds);
+  const from = isoDateMinus(days + 3);
+
+  let competitions: GqlCompetition[];
+  try {
+    const data = await graphql<{ competitions: GqlCompetition[] }>(
+      COMPETITIONS_QUERY,
+      { from }
+    );
+    competitions = data.competitions ?? [];
+  } catch {
+    return [];
+  }
+
+  const liveComps = competitions.filter(
+    (c) => c.wca_id && !knownCompetitionIds.has(c.wca_id)
+  );
+  if (liveComps.length === 0) return [];
+
+  const personMap = new Map<string, PersonPRs>();
+
+  await Promise.all(
+    liveComps.map((comp) =>
+      processCompetitionForPersons(comp, followedIds, ranks, personMap)
+    )
+  );
+
+  const allPRs = Array.from(personMap.values()).flatMap((p) => p.prs);
+  const rankings = await getVirtualRankings(
+    allPRs.map((pr) => ({ eventId: pr.eventId, type: pr.type, time: pr.time }))
+  );
+  for (const pr of allPRs) {
+    const r = rankings.get(`${pr.eventId}:${pr.type}:${pr.time}`);
+    if (r) { pr.wr = r.wr; pr.cr = r.cr; }
+  }
+
+  return Array.from(personMap.values()).filter((p) => p.prs.length > 0);
+}
+
+async function processCompetitionForPersons(
+  comp: GqlCompetition,
+  followedIds: Set<string>,
+  ranks: RankMap,
+  personMap: Map<string, PersonPRs>
+): Promise<void> {
+  let detail: GqlCompetitionWithCompetitors | undefined;
+  try {
+    const data = await graphql<{ competition: GqlCompetitionWithCompetitors }>(
+      COMPETITION_COMPETITORS_QUERY,
+      { id: comp.id }
+    );
+    detail = data.competition;
+  } catch {
+    return;
+  }
+  if (!detail) return;
+
+  const followedCompetitors = detail.competitors.filter(
+    (c) => c.wca_id && followedIds.has(c.wca_id)
+  );
+  if (followedCompetitors.length === 0) return;
+
+  const wcaCompId = detail.wca_id;
+  const endDate = detail.end_date ?? detail.start_date;
+  const compName = detail.name;
+
+  for (let i = 0; i < followedCompetitors.length; i += PERSON_BATCH_SIZE) {
+    const batch = followedCompetitors.slice(i, i + PERSON_BATCH_SIZE);
+    const query = buildPersonBatchQuery(batch.map((c) => c.id));
+
+    let batchData: Record<string, GqlPersonResults | null>;
+    try {
+      batchData = await graphql<Record<string, GqlPersonResults | null>>(query);
+    } catch {
+      continue;
+    }
+
+    for (let j = 0; j < batch.length; j++) {
+      const person = batchData[`p${j}`];
+      if (!person) continue;
+      const wcaId = person.wca_id ?? batch[j].wca_id;
+      if (!wcaId) continue;
+
+      const liveUrl = `https://live.worldcubeassociation.org/competitions/${comp.id}/competitors/${batch[j].id}`;
+      const perEvent = reducePersonResults(person.results ?? []);
+
+      for (const entry of perEvent) {
+        if (entry.best > 0) {
+          const key = `${wcaId}:${entry.eventId}`;
+          const dbBest = ranks.single.get(key);
+          if (!dbBest || entry.best <= dbBest) {
+            addLivePR(personMap, wcaId, person.name, {
+              eventId: entry.eventId,
+              competitionId: wcaCompId,
+              competitionName: compName,
+              cityName: "",
+              endDate,
+              type: "single",
+              time: entry.best,
+              wr: null,
+              cr: null,
+              nr: null,
+              regionalRecord: entry.singleRecord !== "PR" ? entry.singleRecord : null,
+              isLive: true,
+              liveUrl,
+              prevTime: dbBest ?? undefined,
+            });
+          }
+        }
+
+        if (entry.average > 0) {
+          const key = `${wcaId}:${entry.eventId}`;
+          const dbAvgBest = ranks.average.get(key);
+          if (!dbAvgBest || entry.average <= dbAvgBest) {
+            addLivePR(personMap, wcaId, person.name, {
+              eventId: entry.eventId,
+              competitionId: wcaCompId,
+              competitionName: compName,
+              cityName: "",
+              endDate,
+              type: "average",
+              time: entry.average,
+              wr: null,
+              cr: null,
+              nr: null,
+              regionalRecord: entry.averageRecord !== "PR" ? entry.averageRecord : null,
+              isLive: true,
+              liveUrl,
+              prevTime: dbAvgBest ?? undefined,
+            });
+          }
+        }
+      }
+    }
+  }
+}
+
+// ─── Swiss-only variant (original) ────────────────────────────────────────────
+
 async function processCompetition(
   comp: GqlCompetition,
   ranks: RankMap,

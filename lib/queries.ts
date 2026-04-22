@@ -146,6 +146,80 @@ export async function getAllSwissRanks(): Promise<RankMap> {
   return { single, average };
 }
 
+export async function fetchPRsForPersons(personIds: string[], days: number): Promise<PersonPRs[]> {
+  if (personIds.length === 0) return [];
+  const rows = await sql<PRRow[]>`
+    SELECT
+      r.person_id,
+      r.person_name,
+      r.event_id,
+      r.competition_id,
+      c.name            AS competition_name,
+      c.city_name,
+      c.end_date::text  AS end_date,
+      r.best,
+      r.average,
+      r.regional_single_record,
+      r.regional_average_record,
+      rs.world_rank     AS single_wr,
+      rs.continent_rank AS single_cr,
+      rs.country_rank   AS single_nr,
+      ra.world_rank     AS avg_wr,
+      ra.continent_rank AS avg_cr,
+      ra.country_rank   AS avg_nr,
+      (r.best > 0 AND rs.best IS NOT NULL AND r.best = rs.best)       AS is_single_pr,
+      (r.average > 0 AND ra.best IS NOT NULL AND r.average = ra.best) AS is_avg_pr,
+      (
+        SELECT MIN(r2.best) FROM results r2
+        WHERE r2.person_id = r.person_id
+          AND r2.event_id  = r.event_id
+          AND r2.best > r.best AND r2.best > 0
+      ) AS prev_single_best,
+      (
+        SELECT MIN(r2.average) FROM results r2
+        WHERE r2.person_id = r.person_id
+          AND r2.event_id  = r.event_id
+          AND r2.average > r.average AND r2.average > 0
+      ) AS prev_avg_best
+    FROM results r
+    JOIN competitions c ON r.competition_id = c.id
+    LEFT JOIN ranks_single rs
+           ON r.person_id = rs.person_id AND r.event_id = rs.event_id
+    LEFT JOIN ranks_average ra
+           ON r.person_id = ra.person_id AND r.event_id = ra.event_id
+    WHERE
+      r.person_id = ANY(${sql.array(personIds)}::text[])
+      AND c.end_date >= CURRENT_DATE - (${days} * interval '1 day')
+      AND c.end_date <= CURRENT_DATE + interval '1 day'
+      AND (
+        (r.best > 0 AND rs.best IS NOT NULL AND r.best = rs.best)
+        OR
+        (r.average > 0 AND ra.best IS NOT NULL AND r.average = ra.best)
+      )
+    ORDER BY c.end_date DESC, r.person_name, r.event_id
+  `;
+  return groupByPerson(rows);
+}
+
+export async function getRanksForPersons(personIds: string[]): Promise<RankMap> {
+  if (personIds.length === 0) return { single: new Map(), average: new Map() };
+  const [singles, averages] = await Promise.all([
+    sql<{ person_id: string; event_id: string; best: number }[]>`
+      SELECT person_id, event_id, best FROM ranks_single
+      WHERE person_id = ANY(${sql.array(personIds)}::text[])
+    `,
+    sql<{ person_id: string; event_id: string; best: number }[]>`
+      SELECT person_id, event_id, best FROM ranks_average
+      WHERE person_id = ANY(${sql.array(personIds)}::text[])
+    `,
+  ]);
+  const single = new Map<string, number>();
+  const average = new Map<string, number>();
+  for (const r of singles) single.set(`${r.person_id}:${r.event_id}`, r.best);
+  for (const r of averages) average.set(`${r.person_id}:${r.event_id}`, r.best);
+  return { single, average };
+}
+
 export async function getDbCompetitionIds(): Promise<Set<string>> {
   // Only competitions with actual results are considered "in the DB".
   // A competition row may exist before results are imported, so filtering
