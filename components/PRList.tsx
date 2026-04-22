@@ -8,6 +8,10 @@ import JumpNav from "./JumpNav";
 
 const LIKED_KEY = "wca-bravos-liked";
 
+function bravoKey(personId: string, eventId: string, type: string, time: number) {
+  return `${personId}:${eventId}:${type}:${time}`;
+}
+
 interface Props {
   persons: PersonPRs[];
 }
@@ -28,19 +32,25 @@ export default function PRList({ persons }: Props) {
       .catch(() => {});
   }, []);
 
-  const handleBravo = async (personId: string) => {
-    const isLiked = liked.has(personId);
+  const handleBravo = async (
+    personId: string,
+    eventId: string,
+    type: string,
+    time: number
+  ) => {
+    const key = bravoKey(personId, eventId, type, time);
+    const isLiked = liked.has(key);
     const delta = isLiked ? -1 : 1;
 
     // Optimistic update
     setBravos((prev) => ({
       ...prev,
-      [personId]: Math.max(0, (prev[personId] ?? 0) + delta),
+      [key]: Math.max(0, (prev[key] ?? 0) + delta),
     }));
     setLiked((prev) => {
       const next = new Set(prev);
-      if (isLiked) next.delete(personId);
-      else next.add(personId);
+      if (isLiked) next.delete(key);
+      else next.add(key);
       try {
         localStorage.setItem(LIKED_KEY, JSON.stringify([...next]));
       } catch {}
@@ -51,20 +61,20 @@ export default function PRList({ persons }: Props) {
       const res = await fetch("/api/bravos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ personId, delta }),
+        body: JSON.stringify({ personId, eventId, type, time, delta }),
       });
       const data = (await res.json()) as { count: number };
-      setBravos((prev) => ({ ...prev, [personId]: data.count }));
+      setBravos((prev) => ({ ...prev, [key]: data.count }));
     } catch {
       // Revert optimistic update
       setBravos((prev) => ({
         ...prev,
-        [personId]: Math.max(0, (prev[personId] ?? 0) - delta),
+        [key]: Math.max(0, (prev[key] ?? 0) - delta),
       }));
       setLiked((prev) => {
         const next = new Set(prev);
-        if (isLiked) next.add(personId);
-        else next.delete(personId);
+        if (isLiked) next.add(key);
+        else next.delete(key);
         try {
           localStorage.setItem(LIKED_KEY, JSON.stringify([...next]));
         } catch {}
@@ -123,9 +133,9 @@ export default function PRList({ persons }: Props) {
             key={person.personId}
             person={person}
             highlightEvent={selectedEvent === "all" ? undefined : selectedEvent}
-            bravoCount={bravos[person.personId] ?? 0}
-            isLiked={liked.has(person.personId)}
-            onBravo={() => handleBravo(person.personId)}
+            bravos={bravos}
+            liked={liked}
+            onBravo={handleBravo}
           />
         ))}
       </div>

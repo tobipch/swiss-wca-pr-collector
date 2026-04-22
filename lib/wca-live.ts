@@ -219,7 +219,9 @@ export async function fetchLivePRs(
   knownCompetitionIds: Set<string>,
   ranks: RankMap
 ): Promise<PersonPRs[]> {
-  const from = isoDateMinus(days);
+  // Extra buffer so multi-day competitions that started before the window
+  // but ended within it are still fetched (WCA Live filters by start_date).
+  const from = isoDateMinus(days + 3);
 
   let competitions: GqlCompetition[];
   try {

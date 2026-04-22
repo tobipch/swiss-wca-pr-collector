@@ -9,9 +9,9 @@ interface Props {
   person: PersonPRs;
   initialOpen?: boolean;
   highlightEvent?: string;
-  bravoCount?: number;
-  isLiked?: boolean;
-  onBravo?: () => void;
+  bravos?: Record<string, number>;
+  liked?: Set<string>;
+  onBravo?: (personId: string, eventId: string, type: string, time: number) => void;
 }
 
 interface DedupedPR {
@@ -23,8 +23,8 @@ export default function PersonCard({
   person,
   initialOpen = true,
   highlightEvent,
-  bravoCount = 0,
-  isLiked = false,
+  bravos,
+  liked,
   onBravo,
 }: Props) {
   const [open, setOpen] = useState(initialOpen);
@@ -95,10 +95,7 @@ export default function PersonCard({
             {person.personId}
           </span>
         </div>
-        <div className="flex items-center gap-2 shrink-0 ml-2">
-          <BravoButton count={bravoCount} liked={isLiked} onBravo={onBravo} />
-          <ChevronIcon open={open} />
-        </div>
+        <ChevronIcon open={open} />
       </div>
 
       {/* Collapsible body */}
@@ -112,14 +109,24 @@ export default function PersonCard({
                   key={eventId}
                   className={`flex gap-2 flex-wrap transition-opacity duration-200 ${dimmed ? "opacity-30" : ""}`}
                 >
-                  {items.map((item, i) => (
-                    <PRBadge
-                      key={`${item.pr.type}-${item.pr.competitionId}-${i}`}
-                      pr={item.pr}
-                      personId={person.personId}
-                      prevTime={item.prevTime}
-                    />
-                  ))}
+                  {items.map((item, i) => {
+                    const key = `${person.personId}:${item.pr.eventId}:${item.pr.type}:${item.pr.time}`;
+                    return (
+                      <PRBadge
+                        key={`${item.pr.type}-${item.pr.competitionId}-${i}`}
+                        pr={item.pr}
+                        personId={person.personId}
+                        prevTime={item.prevTime}
+                        bravoCount={bravos?.[key] ?? 0}
+                        isLiked={liked?.has(key) ?? false}
+                        onBravo={
+                          onBravo
+                            ? () => onBravo(person.personId, item.pr.eventId, item.pr.type, item.pr.time)
+                            : undefined
+                        }
+                      />
+                    );
+                  })}
                 </div>
               );
             })}
@@ -130,57 +137,10 @@ export default function PersonCard({
   );
 }
 
-function BravoButton({
-  count,
-  liked,
-  onBravo,
-}: {
-  count: number;
-  liked: boolean;
-  onBravo?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        onBravo?.();
-      }}
-      className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full transition-colors ${
-        liked
-          ? "text-red-500 bg-red-50 hover:bg-red-100"
-          : "text-gray-400 hover:text-red-400 hover:bg-red-50"
-      }`}
-      aria-label={liked ? "Bravo entfernen" : "Bravo geben"}
-    >
-      <HeartIcon filled={liked} />
-      {count > 0 && (
-        <span>{count}&nbsp;{count === 1 ? "Bravo" : "Bravos"}</span>
-      )}
-    </button>
-  );
-}
-
-function HeartIcon({ filled }: { filled: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="w-4 h-4 shrink-0"
-      fill={filled ? "currentColor" : "none"}
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-    </svg>
-  );
-}
-
 function ChevronIcon({ open }: { open: boolean }) {
   return (
     <svg
-      className={`w-5 h-5 text-gray-400 transition-transform shrink-0 ${open ? "" : "-rotate-90"}`}
+      className={`w-5 h-5 text-gray-400 transition-transform shrink-0 ml-2 ${open ? "" : "-rotate-90"}`}
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
@@ -191,7 +151,21 @@ function ChevronIcon({ open }: { open: boolean }) {
   );
 }
 
-function PRBadge({ pr, personId, prevTime }: { pr: PR; personId: string; prevTime?: number }) {
+function PRBadge({
+  pr,
+  personId,
+  prevTime,
+  bravoCount = 0,
+  isLiked = false,
+  onBravo,
+}: {
+  pr: PR;
+  personId: string;
+  prevTime?: number;
+  bravoCount?: number;
+  isLiked?: boolean;
+  onBravo?: () => void;
+}) {
   const href = pr.liveUrl
     ? pr.liveUrl
     : `https://www.worldcubeassociation.org/persons/${personId}?event=${pr.eventId}`;
@@ -207,57 +181,97 @@ function PRBadge({ pr, personId, prevTime }: { pr: PR; personId: string; prevTim
   const glow = record ? "shadow-[0_0_12px_4px_rgba(34,197,94,0.5)]" : "";
 
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`group flex flex-col gap-1 border rounded-lg px-3 py-2 transition-colors min-w-[9rem] flex-1 max-w-[14rem] ${colors} ${glow}`}
+    <div
+      className={`group flex flex-col border rounded-lg min-w-[9rem] flex-1 max-w-[14rem] transition-colors ${colors} ${glow}`}
     >
-      {/* Event header */}
-      <div className="flex items-center gap-1.5">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={eventIconUrl(pr.eventId)}
-          alt={eventName(pr.eventId)}
-          width={16}
-          height={16}
-          className="opacity-60"
-        />
-        <span className="text-xs font-medium text-gray-500 truncate">
-          {eventName(pr.eventId)}
-        </span>
-        <span className={`text-xs ml-auto font-medium shrink-0 ${typeColor}`}>
-          {typeLabel(pr.eventId, pr.type)}
-        </span>
-      </div>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex flex-col gap-1 px-3 pt-2 pb-1.5"
+      >
+        {/* Event header */}
+        <div className="flex items-center gap-1.5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={eventIconUrl(pr.eventId)}
+            alt={eventName(pr.eventId)}
+            width={16}
+            height={16}
+            className="opacity-60"
+          />
+          <span className="text-xs font-medium text-gray-500 truncate">
+            {eventName(pr.eventId)}
+          </span>
+          <span className={`text-xs ml-auto font-medium shrink-0 ${typeColor}`}>
+            {typeLabel(pr.eventId, pr.type)}
+          </span>
+        </div>
 
-      {/* Time */}
-      <span className="text-lg font-bold font-mono text-gray-900">
-        {formatTime(pr.time, pr.eventId, pr.type)}
-      </span>
-
-      {/* Previous PR — directly below the time */}
-      {prevTime != null && prevTime > 0 && (
-        <span className="text-xs text-gray-400 -mt-0.5">
-          vorher <span className="font-mono">{formatTime(prevTime, pr.eventId, pr.type)}</span>
+        {/* Time */}
+        <span className="text-lg font-bold font-mono text-gray-900">
+          {formatTime(pr.time, pr.eventId, pr.type)}
         </span>
-      )}
 
-      {/* Rankings / record badges — "PR" tag is suppressed (redundant) */}
-      <div className="flex gap-1 flex-wrap">
-        {pr.regionalRecord && pr.regionalRecord !== "PR" && (
-          <RecordHighlight record={pr.regionalRecord} />
+        {/* Previous PR */}
+        {prevTime != null && prevTime > 0 && (
+          <span className="text-xs text-gray-400 -mt-0.5">
+            vorher <span className="font-mono">{formatTime(prevTime, pr.eventId, pr.type)}</span>
+          </span>
         )}
-        {pr.wr && <RankBadge label="WR" value={pr.wr} />}
-        {pr.cr && <RankBadge label="CR" value={pr.cr} />}
-        {pr.nr && <RankBadge label="NR" value={pr.nr} />}
-      </div>
 
-      {/* Competition */}
-      <span className="text-xs text-gray-400 group-hover:text-gray-600 truncate transition-colors">
-        {pr.competitionName}
-      </span>
-    </a>
+        {/* Rankings / record badges */}
+        <div className="flex gap-1 flex-wrap">
+          {pr.regionalRecord && pr.regionalRecord !== "PR" && (
+            <RecordHighlight record={pr.regionalRecord} />
+          )}
+          {pr.wr && <RankBadge label="WR" value={pr.wr} />}
+          {pr.cr && <RankBadge label="CR" value={pr.cr} />}
+          {pr.nr && <RankBadge label="NR" value={pr.nr} />}
+        </div>
+
+        {/* Competition */}
+        <span className="text-xs text-gray-400 group-hover:text-gray-600 truncate transition-colors">
+          {pr.competitionName}
+        </span>
+      </a>
+
+      {/* Bravo button row */}
+      <div className="flex justify-end px-2 pb-1.5">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onBravo?.();
+          }}
+          className={`flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-full transition-colors ${
+            isLiked
+              ? "text-red-500"
+              : "text-gray-300 hover:text-red-400"
+          }`}
+          aria-label={isLiked ? "Bravo entfernen" : "Bravo geben"}
+        >
+          <HeartIcon filled={isLiked} />
+          {bravoCount > 0 && <span>{bravoCount}</span>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function HeartIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="w-3 h-3 shrink-0"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+    </svg>
   );
 }
 
