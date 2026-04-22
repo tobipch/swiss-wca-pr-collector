@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { PersonPRs } from "@/lib/queries";
 import { eventName, EVENT_ORDER } from "@/lib/events";
 import PersonCard from "./PersonCard";
 import JumpNav from "./JumpNav";
+
+const LIKED_KEY = "wca-bravos-liked";
 
 interface Props {
   persons: PersonPRs[];
@@ -12,6 +14,64 @@ interface Props {
 
 export default function PRList({ persons }: Props) {
   const [selectedEvent, setSelectedEvent] = useState<string>("all");
+  const [bravos, setBravos] = useState<Record<string, number>>({});
+  const [liked, setLiked] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(LIKED_KEY) ?? "[]");
+      setLiked(new Set(stored as string[]));
+    } catch {}
+    fetch("/api/bravos")
+      .then((r) => r.json())
+      .then((data: Record<string, number>) => setBravos(data))
+      .catch(() => {});
+  }, []);
+
+  const handleBravo = async (personId: string) => {
+    const isLiked = liked.has(personId);
+    const delta = isLiked ? -1 : 1;
+
+    // Optimistic update
+    setBravos((prev) => ({
+      ...prev,
+      [personId]: Math.max(0, (prev[personId] ?? 0) + delta),
+    }));
+    setLiked((prev) => {
+      const next = new Set(prev);
+      if (isLiked) next.delete(personId);
+      else next.add(personId);
+      try {
+        localStorage.setItem(LIKED_KEY, JSON.stringify([...next]));
+      } catch {}
+      return next;
+    });
+
+    try {
+      const res = await fetch("/api/bravos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ personId, delta }),
+      });
+      const data = (await res.json()) as { count: number };
+      setBravos((prev) => ({ ...prev, [personId]: data.count }));
+    } catch {
+      // Revert optimistic update
+      setBravos((prev) => ({
+        ...prev,
+        [personId]: Math.max(0, (prev[personId] ?? 0) - delta),
+      }));
+      setLiked((prev) => {
+        const next = new Set(prev);
+        if (isLiked) next.add(personId);
+        else next.delete(personId);
+        try {
+          localStorage.setItem(LIKED_KEY, JSON.stringify([...next]));
+        } catch {}
+        return next;
+      });
+    }
+  };
 
   // Collect all event IDs that appear in any PR, sorted by EVENT_ORDER
   const eventIds = Array.from(
@@ -63,6 +123,9 @@ export default function PRList({ persons }: Props) {
             key={person.personId}
             person={person}
             highlightEvent={selectedEvent === "all" ? undefined : selectedEvent}
+            bravoCount={bravos[person.personId] ?? 0}
+            isLiked={liked.has(person.personId)}
+            onBravo={() => handleBravo(person.personId)}
           />
         ))}
       </div>

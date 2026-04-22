@@ -9,6 +9,9 @@ interface Props {
   person: PersonPRs;
   initialOpen?: boolean;
   highlightEvent?: string;
+  bravoCount?: number;
+  isLiked?: boolean;
+  onBravo?: () => void;
 }
 
 interface DedupedPR {
@@ -16,7 +19,14 @@ interface DedupedPR {
   prevTime?: number;
 }
 
-export default function PersonCard({ person, initialOpen = true, highlightEvent }: Props) {
+export default function PersonCard({
+  person,
+  initialOpen = true,
+  highlightEvent,
+  bravoCount = 0,
+  isLiked = false,
+  onBravo,
+}: Props) {
   const [open, setOpen] = useState(initialOpen);
 
   // Deduplicate: for each (eventId, type) keep the most recent PR; if same
@@ -85,7 +95,10 @@ export default function PersonCard({ person, initialOpen = true, highlightEvent 
             {person.personId}
           </span>
         </div>
-        <ChevronIcon open={open} />
+        <div className="flex items-center gap-2 shrink-0 ml-2">
+          <BravoButton count={bravoCount} liked={isLiked} onBravo={onBravo} />
+          <ChevronIcon open={open} />
+        </div>
       </div>
 
       {/* Collapsible body */}
@@ -117,10 +130,57 @@ export default function PersonCard({ person, initialOpen = true, highlightEvent 
   );
 }
 
+function BravoButton({
+  count,
+  liked,
+  onBravo,
+}: {
+  count: number;
+  liked: boolean;
+  onBravo?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onBravo?.();
+      }}
+      className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full transition-colors ${
+        liked
+          ? "text-red-500 bg-red-50 hover:bg-red-100"
+          : "text-gray-400 hover:text-red-400 hover:bg-red-50"
+      }`}
+      aria-label={liked ? "Bravo entfernen" : "Bravo geben"}
+    >
+      <HeartIcon filled={liked} />
+      {count > 0 && (
+        <span>{count}&nbsp;{count === 1 ? "Bravo" : "Bravos"}</span>
+      )}
+    </button>
+  );
+}
+
+function HeartIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="w-4 h-4 shrink-0"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+    </svg>
+  );
+}
+
 function ChevronIcon({ open }: { open: boolean }) {
   return (
     <svg
-      className={`w-5 h-5 text-gray-400 transition-transform shrink-0 ml-2 ${open ? "" : "-rotate-90"}`}
+      className={`w-5 h-5 text-gray-400 transition-transform shrink-0 ${open ? "" : "-rotate-90"}`}
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"

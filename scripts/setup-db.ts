@@ -126,6 +126,13 @@ async function main() {
       ON competitions (end_date)
   `;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS bravos (
+      person_id TEXT PRIMARY KEY,
+      count     INTEGER NOT NULL DEFAULT 0
+    )
+  `;
+
   console.log("All tables created successfully.");
   await sql.end();
 }
