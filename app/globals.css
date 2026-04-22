@@ -13,18 +13,18 @@
 
 .bravo-shimmer-blue {
   background: linear-gradient(105deg,
-    #eff6ff 0%, #eff6ff 30%,
-    #93c5fd 47%, #bfdbfe 53%,
-    #eff6ff 70%, #eff6ff 100%);
-  background-size: 200% 100%;
-  animation: shimmer-blue 2.2s ease-in-out infinite;
+    #dbeafe 0%, #dbeafe 35%,
+    #bfdbfe 48%, #dbeafe 62%,
+    #dbeafe 100%);
+  background-size: 250% 100%;
+  animation: shimmer-blue 3.5s ease-in-out infinite;
 }
 
 .bravo-shimmer-orange {
   background: linear-gradient(105deg,
-    #fff7ed 0%, #fff7ed 30%,
-    #fb923c 47%, #fed7aa 53%,
-    #fff7ed 70%, #fff7ed 100%);
-  background-size: 200% 100%;
-  animation: shimmer-orange 2.2s ease-in-out infinite;
+    #ffedd5 0%, #ffedd5 35%,
+    #fed7aa 48%, #ffedd5 62%,
+    #ffedd5 100%);
+  background-size: 250% 100%;
+  animation: shimmer-orange 3.5s ease-in-out infinite;
 }

@@ -183,8 +183,8 @@ function badgeInlineStyle(
     ? { background: "linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%)", boxShadow: "0 4px 14px rgba(59,130,246,.3)" }
     : { background: "linear-gradient(135deg,#fff7ed 0%,#fed7aa 100%)", boxShadow: "0 4px 14px rgba(249,115,22,.3)" };
   if (level === 3) return isSingle
-    ? { boxShadow: "0 6px 20px rgba(59,130,246,.4)" }
-    : { boxShadow: "0 6px 20px rgba(249,115,22,.4)" };
+    ? { boxShadow: "0 4px 12px rgba(59,130,246,.2)" }
+    : { boxShadow: "0 4px 12px rgba(249,115,22,.2)" };
   return {};
 }
 
