@@ -126,6 +126,32 @@ async function main() {
       ON competitions (end_date)
   `;
 
+  // Migration: drop old single-column bravos table (person_id only) if it exists
+  await sql`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables WHERE table_name = 'bravos'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'bravos' AND column_name = 'event_id'
+      ) THEN
+        DROP TABLE bravos;
+      END IF;
+    END $$
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS bravos (
+      person_id TEXT    NOT NULL,
+      event_id  TEXT    NOT NULL,
+      type      TEXT    NOT NULL,
+      time      INTEGER NOT NULL,
+      count     INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (person_id, event_id, type, time)
+    )
+  `;
+
   console.log("All tables created successfully.");
   await sql.end();
 }

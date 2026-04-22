@@ -9,6 +9,9 @@ interface Props {
   person: PersonPRs;
   initialOpen?: boolean;
   highlightEvent?: string;
+  bravos?: Record<string, number>;
+  liked?: Set<string>;
+  onBravo?: (personId: string, eventId: string, type: string, time: number) => void;
 }
 
 interface DedupedPR {
@@ -16,7 +19,14 @@ interface DedupedPR {
   prevTime?: number;
 }
 
-export default function PersonCard({ person, initialOpen = true, highlightEvent }: Props) {
+export default function PersonCard({
+  person,
+  initialOpen = true,
+  highlightEvent,
+  bravos,
+  liked,
+  onBravo,
+}: Props) {
   const [open, setOpen] = useState(initialOpen);
 
   // Deduplicate: for each (eventId, type) keep the most recent PR; if same
@@ -99,14 +109,24 @@ export default function PersonCard({ person, initialOpen = true, highlightEvent 
                   key={eventId}
                   className={`flex gap-2 flex-wrap transition-opacity duration-200 ${dimmed ? "opacity-30" : ""}`}
                 >
-                  {items.map((item, i) => (
-                    <PRBadge
-                      key={`${item.pr.type}-${item.pr.competitionId}-${i}`}
-                      pr={item.pr}
-                      personId={person.personId}
-                      prevTime={item.prevTime}
-                    />
-                  ))}
+                  {items.map((item, i) => {
+                    const key = `${person.personId}:${item.pr.eventId}:${item.pr.type}:${item.pr.time}`;
+                    return (
+                      <PRBadge
+                        key={`${item.pr.type}-${item.pr.competitionId}-${i}`}
+                        pr={item.pr}
+                        personId={person.personId}
+                        prevTime={item.prevTime}
+                        bravoCount={bravos?.[key] ?? 0}
+                        isLiked={liked?.has(key) ?? false}
+                        onBravo={
+                          onBravo
+                            ? () => onBravo(person.personId, item.pr.eventId, item.pr.type, item.pr.time)
+                            : undefined
+                        }
+                      />
+                    );
+                  })}
                 </div>
               );
             })}
@@ -131,73 +151,164 @@ function ChevronIcon({ open }: { open: boolean }) {
   );
 }
 
-function PRBadge({ pr, personId, prevTime }: { pr: PR; personId: string; prevTime?: number }) {
+function bravoLevel(count: number): 0 | 1 | 2 | 3 {
+  if (count >= 20) return 3;
+  if (count >= 10) return 2;
+  if (count >= 5)  return 1;
+  return 0;
+}
+
+function badgeColorClasses(isSingle: boolean, level: 0 | 1 | 2 | 3): string {
+  if (isSingle) return [
+    "bg-blue-50   hover:bg-blue-100  border   border-blue-200  hover:border-blue-300",
+    "bg-blue-100  hover:bg-blue-200  border-2 border-blue-400  hover:border-blue-500",
+    "             border-2 border-blue-500  hover:border-blue-600",
+    "bravo-shimmer-blue border-2 border-blue-600 hover:border-blue-700",
+  ][level];
+  return [
+    "bg-orange-50  hover:bg-orange-100 border   border-orange-200 hover:border-orange-300",
+    "bg-orange-100 hover:bg-orange-200 border-2 border-orange-400 hover:border-orange-500",
+    "              border-2 border-orange-500 hover:border-orange-600",
+    "bravo-shimmer-orange border-2 border-orange-600 hover:border-orange-700",
+  ][level];
+}
+
+function badgeInlineStyle(
+  isSingle: boolean,
+  level: 0 | 1 | 2 | 3,
+  hasRecord: boolean
+): React.CSSProperties {
+  if (hasRecord) return { boxShadow: "0 0 12px 4px rgba(34,197,94,0.5)" };
+  if (level === 2) return isSingle
+    ? { background: "linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%)", boxShadow: "0 4px 14px rgba(59,130,246,.3)" }
+    : { background: "linear-gradient(135deg,#fff7ed 0%,#fed7aa 100%)", boxShadow: "0 4px 14px rgba(249,115,22,.3)" };
+  if (level === 3) return isSingle
+    ? { boxShadow: "0 4px 12px rgba(59,130,246,.2)" }
+    : { boxShadow: "0 4px 12px rgba(249,115,22,.2)" };
+  return {};
+}
+
+function PRBadge({
+  pr,
+  personId,
+  prevTime,
+  bravoCount = 0,
+  isLiked = false,
+  onBravo,
+}: {
+  pr: PR;
+  personId: string;
+  prevTime?: number;
+  bravoCount?: number;
+  isLiked?: boolean;
+  onBravo?: () => void;
+}) {
   const href = pr.liveUrl
     ? pr.liveUrl
     : `https://www.worldcubeassociation.org/persons/${personId}?event=${pr.eventId}`;
   const isSingle = pr.type === "single";
-
-  const colors = isSingle
-    ? "bg-blue-50 hover:bg-blue-100 border-blue-200 hover:border-blue-300"
-    : "bg-orange-50 hover:bg-orange-100 border-orange-200 hover:border-orange-300";
-
-  const typeColor = isSingle ? "text-blue-500" : "text-orange-500";
-
+  const level = bravoLevel(bravoCount);
   const record = pr.regionalRecord && pr.regionalRecord !== "PR" ? pr.regionalRecord : null;
-  const glow = record ? "shadow-[0_0_12px_4px_rgba(34,197,94,0.5)]" : "";
+
+  const typeColors = ["text-blue-500","text-blue-500","text-blue-600","text-blue-700"];
+  const typeColorOrange = ["text-orange-500","text-orange-500","text-orange-600","text-orange-700"];
+  const typeColor = isSingle ? typeColors[level] : typeColorOrange[level];
+
+  const heartColor = isLiked
+    ? "text-red-500"
+    : level > 0
+    ? (isSingle ? "text-blue-300 hover:text-blue-500" : "text-orange-300 hover:text-orange-500")
+    : "text-gray-300 hover:text-red-400";
 
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`group flex flex-col gap-1 border rounded-lg px-3 py-2 transition-colors min-w-[9rem] flex-1 max-w-[14rem] ${colors} ${glow}`}
+    <div
+      className={`group flex flex-col rounded-lg min-w-[9rem] flex-1 max-w-[14rem] transition-colors ${badgeColorClasses(isSingle, level)}`}
+      style={badgeInlineStyle(isSingle, level, !!record)}
     >
-      {/* Event header */}
-      <div className="flex items-center gap-1.5">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={eventIconUrl(pr.eventId)}
-          alt={eventName(pr.eventId)}
-          width={16}
-          height={16}
-          className="opacity-60"
-        />
-        <span className="text-xs font-medium text-gray-500 truncate">
-          {eventName(pr.eventId)}
-        </span>
-        <span className={`text-xs ml-auto font-medium shrink-0 ${typeColor}`}>
-          {typeLabel(pr.eventId, pr.type)}
-        </span>
-      </div>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex flex-col gap-1 px-3 pt-2 pb-1.5"
+      >
+        {/* Event header */}
+        <div className="flex items-center gap-1.5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={eventIconUrl(pr.eventId)}
+            alt={eventName(pr.eventId)}
+            width={16}
+            height={16}
+            className="opacity-60"
+          />
+          <span className="text-xs font-medium text-gray-500 truncate">
+            {eventName(pr.eventId)}
+          </span>
+          <span className={`text-xs ml-auto font-medium shrink-0 ${typeColor}`}>
+            {typeLabel(pr.eventId, pr.type)}
+          </span>
+        </div>
 
-      {/* Time */}
-      <span className="text-lg font-bold font-mono text-gray-900">
-        {formatTime(pr.time, pr.eventId, pr.type)}
-      </span>
-
-      {/* Previous PR — directly below the time */}
-      {prevTime != null && prevTime > 0 && (
-        <span className="text-xs text-gray-400 -mt-0.5">
-          vorher <span className="font-mono">{formatTime(prevTime, pr.eventId, pr.type)}</span>
+        {/* Time */}
+        <span className="text-lg font-bold font-mono text-gray-900">
+          {formatTime(pr.time, pr.eventId, pr.type)}
         </span>
-      )}
 
-      {/* Rankings / record badges — "PR" tag is suppressed (redundant) */}
-      <div className="flex gap-1 flex-wrap">
-        {pr.regionalRecord && pr.regionalRecord !== "PR" && (
-          <RecordHighlight record={pr.regionalRecord} />
+        {/* Previous PR */}
+        {prevTime != null && prevTime > 0 && (
+          <span className="text-xs text-gray-400 -mt-0.5">
+            vorher <span className="font-mono">{formatTime(prevTime, pr.eventId, pr.type)}</span>
+          </span>
         )}
-        {pr.wr && <RankBadge label="WR" value={pr.wr} />}
-        {pr.cr && <RankBadge label="CR" value={pr.cr} />}
-        {pr.nr && <RankBadge label="NR" value={pr.nr} />}
-      </div>
 
-      {/* Competition */}
-      <span className="text-xs text-gray-400 group-hover:text-gray-600 truncate transition-colors">
-        {pr.competitionName}
-      </span>
-    </a>
+        {/* Rankings / record badges */}
+        <div className="flex gap-1 flex-wrap">
+          {pr.regionalRecord && pr.regionalRecord !== "PR" && (
+            <RecordHighlight record={pr.regionalRecord} />
+          )}
+          {pr.wr && <RankBadge label="WR" value={pr.wr} />}
+          {pr.cr && <RankBadge label="CR" value={pr.cr} />}
+          {pr.nr && <RankBadge label="NR" value={pr.nr} />}
+        </div>
+
+        {/* Competition */}
+        <span className="text-xs text-gray-400 group-hover:text-gray-600 truncate transition-colors">
+          {pr.competitionName}
+        </span>
+      </a>
+
+      {/* Bravo button row */}
+      <div className="flex justify-end px-2 pb-1.5">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onBravo?.();
+          }}
+          className={`flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-full transition-colors ${heartColor}`}
+          aria-label={isLiked ? "Bravo entfernen" : "Bravo geben"}
+        >
+          <HeartIcon filled={isLiked} />
+          {bravoCount > 0 && <span>{bravoCount}</span>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function HeartIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="w-3 h-3 shrink-0"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+    </svg>
   );
 }
 
