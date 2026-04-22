@@ -173,19 +173,36 @@ function badgeColorClasses(isSingle: boolean, level: 0 | 1 | 2 | 3): string {
   ][level];
 }
 
+function recordStripe(record: string): string {
+  if (record === "WR") return "linear-gradient(90deg,#fbbf24,#f59e0b,#fbbf24)";
+  if (record === "CR") return "linear-gradient(90deg,#60a5fa,#3b82f6,#60a5fa)";
+  return "linear-gradient(90deg,#4ade80,#22c55e,#4ade80)";
+}
+
 function badgeInlineStyle(
   isSingle: boolean,
   level: 0 | 1 | 2 | 3,
   hasRecord: boolean
 ): React.CSSProperties {
-  if (hasRecord) return { boxShadow: "0 0 12px 4px rgba(34,197,94,0.5)" };
-  if (level === 2) return isSingle
-    ? { background: "linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%)", boxShadow: "0 4px 14px rgba(59,130,246,.3)" }
-    : { background: "linear-gradient(135deg,#fff7ed 0%,#fed7aa 100%)", boxShadow: "0 4px 14px rgba(249,115,22,.3)" };
-  if (level === 3) return isSingle
-    ? { boxShadow: "0 4px 12px rgba(59,130,246,.2)" }
-    : { boxShadow: "0 4px 12px rgba(249,115,22,.2)" };
-  return {};
+  const shadows: string[] = [];
+  const style: React.CSSProperties = {};
+
+  if (hasRecord) {
+    shadows.push("0 8px 24px rgba(34,197,94,0.3)", "0 2px 8px rgba(34,197,94,0.15)");
+    style.transform = "translateY(-4px)";
+  }
+
+  if (level === 2) {
+    style.background = isSingle
+      ? "linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%)"
+      : "linear-gradient(135deg,#fff7ed 0%,#fed7aa 100%)";
+    shadows.push(isSingle ? "0 4px 14px rgba(59,130,246,.3)" : "0 4px 14px rgba(249,115,22,.3)");
+  } else if (level === 3) {
+    shadows.push(isSingle ? "0 4px 12px rgba(59,130,246,.2)" : "0 4px 12px rgba(249,115,22,.2)");
+  }
+
+  if (shadows.length) style.boxShadow = shadows.join(", ");
+  return style;
 }
 
 function PRBadge({
@@ -222,9 +239,12 @@ function PRBadge({
 
   return (
     <div
-      className={`group flex flex-col rounded-lg min-w-[9rem] flex-1 max-w-[14rem] transition-colors ${badgeColorClasses(isSingle, level)}`}
+      className={`group flex flex-col rounded-lg min-w-[9rem] flex-1 max-w-[14rem] transition-colors overflow-hidden ${record ? "relative z-10" : ""} ${badgeColorClasses(isSingle, level)}`}
       style={badgeInlineStyle(isSingle, level, !!record)}
     >
+      {record && (
+        <div className="h-[3px] shrink-0" style={{ background: recordStripe(record) }} />
+      )}
       <a
         href={href}
         target="_blank"
